@@ -35,7 +35,7 @@ struct v2g_context* v2g_ctx = nullptr;
 namespace module {
 
 void EvseV2G::init() {
-
+EVLOG_info << "##### LOCAL EvseV2G INIT CALLED (modules/EvseV2G) #####";
     std::vector<ISO15118_vasIntf*> r_vas;
     r_vas.reserve(r_iso15118_vas.size());
     for (const auto& vas : r_iso15118_vas) {

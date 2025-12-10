@@ -82,6 +82,11 @@ v2g_event din_validate_response_code(din_responseCodeType* const din_response_co
 
     if (conn->ctx->is_connection_terminated == true) {
         dlog(DLOG_LEVEL_ERROR, "Connection is terminated. Abort charging");
+        dlog(DLOG_LEVEL_ERROR,
+             "[HLC][DIN] TCP/PLC connection terminated "
+             "(state=%s, msg=%s, session_id=0x%016" PRIx64 ")",
+             din_states[conn->ctx->state].description, v2g_msg_type[conn->ctx->current_v2g_msg],
+             be64toh(conn->ctx->evse_v2g_data.session_id));
         return V2G_EVENT_TERMINATE_CONNECTION;
     }
 
@@ -107,6 +112,11 @@ v2g_event din_validate_response_code(din_responseCodeType* const din_response_co
     if ((conn->ctx->terminate_connection_on_failed_response == true) &&
         (*din_response_code >= din_responseCodeType_FAILED)) {
         nextEvent = V2G_EVENT_SEND_AND_TERMINATE; // [V2G-DC-665]
+        dlog(DLOG_LEVEL_WARNING,
+             "[HLC][DIN] Terminate after failed response "
+             "(state=%s, msg=%s, resp=%s, stop_hlc=%d, emergency=%d)",
+             din_states[conn->ctx->state].description, v2g_msg_type[conn->ctx->current_v2g_msg],
+             dinResponse[*din_response_code], conn->ctx->stop_hlc.load(), conn->ctx->intl_emergency_shutdown.load());
     }
 
     /* log failed response code message */
@@ -916,6 +926,12 @@ static enum v2g_event handle_din_welding_detection(struct v2g_connection* conn) 
 static enum v2g_event handle_din_session_stop(struct v2g_connection* conn) {
     struct din_SessionStopResType* res = &conn->exi_out.dinEXIDocument->V2G_Message.Body.SessionStopRes;
 
+    dlog(DLOG_LEVEL_INFO,
+         "[HLC][DIN] SessionStopReq from EV "
+         "(state=%s, msg=%s, session_id=0x%016" PRIx64 ")",
+         din_states[conn->ctx->state].description, v2g_msg_type[conn->ctx->current_v2g_msg],
+         be64toh(conn->ctx->evse_v2g_data.session_id));
+
     /* Now fill the EVSE response message */
     res->ResponseCode = din_responseCodeType_OK; // [V2G-DC-388]
 
@@ -1085,6 +1101,14 @@ enum v2g_event din_handle_request(v2g_connection* conn) {
 
         dlog(DLOG_LEVEL_TRACE, "Current state: %s", din_states[conn->ctx->state].description);
         conn->ctx->last_v2g_msg = conn->ctx->current_v2g_msg;
+    }
+
+    if (next_v2g_event == V2G_EVENT_TERMINATE_CONNECTION || next_v2g_event == V2G_EVENT_SEND_AND_TERMINATE) {
+        dlog(DLOG_LEVEL_WARNING,
+             "[HLC][DIN] Session will terminate "
+             "(event=%d, state=%s, msg=%s, session_id=0x%016" PRIx64 ")",
+             next_v2g_event, din_states[conn->ctx->state].description, v2g_msg_type[conn->ctx->current_v2g_msg],
+             be64toh(conn->ctx->evse_v2g_data.session_id));
     }
 
     return next_v2g_event;

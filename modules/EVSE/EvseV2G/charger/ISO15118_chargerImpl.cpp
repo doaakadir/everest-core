@@ -280,7 +280,10 @@ void ISO15118_chargerImpl::handle_ac_contactor_closed(bool& status) {
 void ISO15118_chargerImpl::handle_dlink_ready(bool& value) {
     // FIXME: dlink_ready(true) is ignored for now
     // If dlink becomes not ready (false), stop TCP connection in the read thread
+    dlog(DLOG_LEVEL_WARNING, "handle_dlink_ready(%s) -> is_connection_terminated=%d", value ? "true" : "false",
+         v2g_ctx->is_connection_terminated.load());
     if (!value) {
+        dlog(DLOG_LEVEL_WARNING, "D-LINK reported not ready -> marking connection for termination");
         v2g_ctx->is_connection_terminated = true;
     }
 }
@@ -299,7 +302,7 @@ void ISO15118_chargerImpl::handle_receipt_is_required(bool& receipt_required) {
 
 void ISO15118_chargerImpl::handle_stop_charging(bool& stop) {
     // FIXME we need to use locks on v2g-ctx in all commands as they are running in different threads
-
+    dlog(DLOG_LEVEL_WARNING, "handle_stop_charging(stop=true) called -> ignoring stop request");
     if (stop) {
         // spawn new thread to not block command handler
         std::thread([stop] {

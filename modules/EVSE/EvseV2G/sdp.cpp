@@ -37,8 +37,7 @@
 #define POLL_TIMEOUT 20
 
 /* link-local multicast address ff02::1 aka ip6-allnodes */
-#define IN6ADDR_ALLNODES                                                                                               \
-    { 0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01 }
+#define IN6ADDR_ALLNODES {0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01}
 
 /* bundles various aspects of a SDP query */
 struct sdp_query {
@@ -294,6 +293,12 @@ int sdp_listen(struct v2g_context* v2g_ctx) {
                 continue;
             }
 
+            if (len == sizeof(buffer)) {
+                char addrbuf[INET6_ADDRSTRLEN];
+                inet_ntop(AF_INET6, &sdp_query.remote_addr.sin6_addr, addrbuf, sizeof(addrbuf));
+                dlog(DLOG_LEVEL_INFO, "SDP request from [%s]:%u payload=[0x%02x 0x%02x]", addrbuf,
+                     ntohs(sdp_query.remote_addr.sin6_port), buffer[SDP_HEADER_LEN], buffer[SDP_HEADER_LEN + 1]);
+            }
             addr = inet_ntop(AF_INET6, &sdp_query.remote_addr.sin6_addr, addrbuf, sizeof(addrbuf));
 
             if (len != sizeof(buffer)) {

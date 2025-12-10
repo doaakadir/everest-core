@@ -180,6 +180,7 @@ void Charger::run_state_machine() {
         if (initialize_state) {
             internal_context.current_state_started = now;
             signal_state(shared_context.current_state);
+            EVLOG_info << "STATE: " << evse_state_to_string(shared_context.current_state);
         }
 
         auto time_in_current_state =
