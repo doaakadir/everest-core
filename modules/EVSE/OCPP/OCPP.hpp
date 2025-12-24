@@ -37,6 +37,7 @@
 #include <date/tz.h>
 #include <everest/timer.hpp>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -114,7 +115,7 @@ public:
         r_data_transfer(std::move(r_data_transfer)),
         r_display_message(std::move(r_display_message)),
         r_extensions_15118(std::move(r_extensions_15118)),
-        config(config){};
+        config(config) {};
 
     Everest::MqttProvider& mqtt;
     const std::unique_ptr<ocpp_1_6_charge_pointImplBase> p_main;
@@ -183,6 +184,10 @@ private:
     void process_session_event(int32_t evse_id, const types::evse_manager::SessionEvent& session_event);
 
     std::string source_ext_limit;
+
+    std::mutex ocpp_powermeter_log_counter_mutex;
+    std::map<int32_t, uint32_t> ocpp_powermeter_log_counter;
+
     // ev@211cfdbe-f69a-4cd6-a4ec-f8aaa3d1b6c8:v1
 };
 

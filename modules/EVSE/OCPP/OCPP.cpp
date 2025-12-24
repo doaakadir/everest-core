@@ -2,6 +2,8 @@
 // Copyright 2020 - 2022 Pionix GmbH and Contributors to EVerest
 #include "OCPP.hpp"
 
+#include "../evse_logging_utils.hpp"
+
 #include <cmath>
 #include <fstream>
 #include <optional>
@@ -13,6 +15,7 @@
 #include "ocpp/v16/types.hpp"
 #include <everest/conversions/ocpp/ocpp_conversions.hpp>
 #include <fmt/core.h>
+#include <nlohmann/json.hpp>
 
 #include <conversions.hpp>
 #include <error_mapping.hpp>
@@ -288,6 +291,27 @@ void OCPP::init_evse_subscriptions() {
     int32_t evse_id = 1;
     for (auto& evse : this->r_evse_manager) {
         evse->subscribe_powermeter([this, evse_id](types::powermeter::Powermeter powermeter) {
+            bool log_sample = false;
+            if (const auto sec = evse_logging_utils::extract_second_from_rfc3339(powermeter.timestamp)) {
+                log_sample = (sec.value() % 10 == 0);
+            } else {
+                uint32_t counter = 0;
+                {
+                    std::lock_guard<std::mutex> lg(this->ocpp_powermeter_log_counter_mutex);
+                    counter = ++this->ocpp_powermeter_log_counter[evse_id];
+                }
+                log_sample = (counter % 5 == 0);
+            }
+            if (log_sample) {
+                nlohmann::json j = powermeter;
+                const std::string payload = j.dump();
+                const uint32_t fp = evse_logging_utils::fnv1a_32(payload);
+                EVLOG_info << "\x1b[36m"
+                           << "[EV MNGR -> OCPP] evse_id=" << evse_id
+                           << " ts=" << powermeter.timestamp
+                           << " fp=" << fmt::format("{:08x}", fp)
+                           << " " << payload << "\x1b[0m";
+            }
             ocpp::Measurement measurement;
             measurement.power_meter = conversions::to_ocpp_power_meter(powermeter);
             if (this->evse_soc_map[evse_id].has_value()) {

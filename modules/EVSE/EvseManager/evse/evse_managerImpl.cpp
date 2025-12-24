@@ -3,6 +3,8 @@
 #include "evse_managerImpl.hpp"
 #include <utils/date.hpp>
 
+#include "../../evse_logging_utils.hpp"
+
 #include <date/date.h>
 #include <date/tz.h>
 #include <utils/date.hpp>
@@ -10,6 +12,7 @@
 #include <fmt/core.h>
 
 #include "SessionLog.hpp"
+#include <nlohmann/json.hpp>
 
 namespace module {
 
@@ -64,6 +67,23 @@ void evse_managerImpl::init() {
     if (mod->r_powermeter_billing().size() > 0) {
         mod->r_powermeter_billing()[0]->subscribe_powermeter([this](const types::powermeter::Powermeter& p) {
             // Republish data on proxy powermeter struct
+            bool log_sample = false;
+            if (const auto sec = evse_logging_utils::extract_second_from_rfc3339(p.timestamp)) {
+                log_sample = (sec.value() % 10 == 0);
+            } else {
+                log_sample = (++powermeter_log_counter % 5 == 0);
+            }
+            if (log_sample) {
+                nlohmann::json j = p;
+                const std::string payload = j.dump();
+                const uint32_t fp = evse_logging_utils::fnv1a_32(payload);
+                EVLOG_info << "\x1b[36m"
+                           << "[PM -> EV MNGR] evse_id=" << mod->config.evse_id
+                           << " connector_id=" << mod->config.connector_id
+                           << " ts=" << p.timestamp
+                           << " fp=" << fmt::format("{:08x}", fp)
+                           << " " << payload << "\x1b[0m";
+            }
             publish_powermeter(p);
         });
         mod->r_powermeter_billing()[0]->subscribe_public_key_ocmf([this](const std::string& public_key_ocmf) {
