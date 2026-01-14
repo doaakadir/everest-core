@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <fstream>
 #include <limits>
+#include <string>
 
 #include <fmt/core.h>
 #include <ryml.hpp>
@@ -44,6 +45,23 @@ struct RymlCallbackInitializer {
 };
 
 namespace {
+long long parse_integer_string(const std::string& value_string) {
+    std::size_t start = 0;
+    if (!value_string.empty() && (value_string[0] == '-' || value_string[0] == '+')) {
+        start = 1;
+    }
+    int base = 10;
+    if (value_string.size() >= start + 2 && value_string[start] == '0' &&
+        (value_string[start + 1] == 'x' || value_string[start + 1] == 'X')) {
+        base = 16;
+    }
+    if (base == 10) {
+        return std::stoi(value_string);
+    } else {
+        return std::stoll(value_string, nullptr, base);
+    }
+}
+
 // NOLINTNEXTLINE(misc-no-recursion): recursive parsing preferred for simplicity
 nlohmann::ordered_json ryml_to_nlohmann_json(const c4::yml::ConstNodeRef& ryml_node) {
     if (ryml_node.is_map()) {
@@ -70,7 +88,7 @@ nlohmann::ordered_json ryml_to_nlohmann_json(const c4::yml::ConstNodeRef& ryml_n
         if (!value_quoted) {
             // check for numbers and booleans
             if (ryml_node.val().is_integer()) {
-                return std::stoi(value_string);
+                return parse_integer_string(value_string);
             } else if (ryml_node.val().is_number()) {
                 return std::stod(value_string);
             } else if (value_string == "true") {
