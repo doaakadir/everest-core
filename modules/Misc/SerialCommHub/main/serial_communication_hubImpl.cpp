@@ -30,6 +30,29 @@ static std::vector<int> vector_to_int(const std::vector<uint16_t>& response) {
     return i;
 }
 
+static std::vector<uint8_t> vector_to_uint8(const std::vector<int>& response) {
+    std::vector<uint8_t> out;
+    out.reserve(response.size());
+    for (int r : response) {
+        int v = r;
+        if (v < 0)
+            v = 0;
+        if (v > 255)
+            v = 255;
+        out.push_back(static_cast<uint8_t>(v));
+    }
+    return out;
+}
+
+static std::vector<int> vector_uint8_to_int(const std::vector<uint8_t>& response) {
+    std::vector<int> out;
+    out.reserve(response.size());
+    for (auto r : response) {
+        out.push_back(static_cast<int>(r));
+    }
+    return out;
+}
+
 /**
  * @brief Converts a Result to a ResultBool by looking at each bit of the uint16_t values and converting them to
  * bools in the right order. Used for Modbus read coils responses where the result is a bit-packed array of coil states.
@@ -199,6 +222,45 @@ serial_communication_hubImpl::handle_modbus_write_single_coil(int& target_device
                                     true, {static_cast<uint16_t>(data ? 0xFF00 : 0x0000)});
 
     return result.status_code;
+}
+
+types::serial_comm_hub_requests::ResultRaw
+serial_communication_hubImpl::handle_raw_txrx(types::serial_comm_hub_requests::VectorUint8& tx_bytes, int& timeout_ms,
+                                              int& max_rx_bytes) {
+    types::serial_comm_hub_requests::ResultRaw result;
+    std::scoped_lock lock(serial_mutex);
+
+    const int timeout = (timeout_ms < 0) ? 0 : timeout_ms;
+    const int max_rx = (max_rx_bytes < 0) ? 0 : max_rx_bytes;
+    const bool wait_for_reply = (timeout > 0 && max_rx > 0);
+
+    try {
+        const auto tx = vector_to_uint8(tx_bytes.data);
+        auto rx = modbus.txrx_raw(tx, wait_for_reply, std::chrono::milliseconds(timeout),
+                                  std::chrono::milliseconds(config.within_message_timeout_ms),
+                                  static_cast<size_t>(max_rx));
+
+        if (!wait_for_reply) {
+            result.status_code = types::serial_comm_hub_requests::StatusCodeEnum::Success;
+            return result;
+        }
+
+        if (rx.empty()) {
+            result.status_code = types::serial_comm_hub_requests::StatusCodeEnum::Error;
+            return result;
+        }
+
+        result.status_code = types::serial_comm_hub_requests::StatusCodeEnum::Success;
+        result.value = vector_uint8_to_int(rx);
+    } catch (const std::exception& e) {
+        EVLOG_warning << "Raw serial txrx failed: " << e.what();
+        result.status_code = types::serial_comm_hub_requests::StatusCodeEnum::Error;
+    } catch (...) {
+        EVLOG_warning << "Raw serial txrx failed (unknown)";
+        result.status_code = types::serial_comm_hub_requests::StatusCodeEnum::Error;
+    }
+
+    return result;
 }
 
 types::serial_comm_hub_requests::ResultBool

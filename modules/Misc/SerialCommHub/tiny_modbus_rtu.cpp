@@ -328,6 +328,11 @@ bool TinyModbusRTU::open_device(const std::string& device, int _baud, bool _igno
 }
 
 int TinyModbusRTU::read_reply(uint8_t* rxbuf, int rxbuf_len) {
+    return read_raw(rxbuf, rxbuf_len, initial_timeout, within_message_timeout);
+}
+
+int TinyModbusRTU::read_raw(uint8_t* rxbuf, int rxbuf_len, std::chrono::milliseconds _initial_timeout,
+                            std::chrono::milliseconds _within_message_timeout) {
     if (fd == -1) {
         return 0;
     }
@@ -342,8 +347,8 @@ int TinyModbusRTU::read_reply(uint8_t* rxbuf, int rxbuf_len) {
         return timeout;
     };
 
-    auto timeout = to_timeval(initial_timeout);
-    const auto within_message_timeval = to_timeval(within_message_timeout);
+    auto timeout = to_timeval(_initial_timeout);
+    const auto within_message_timeval = to_timeval(_within_message_timeout);
 
     fd_set set;
     FD_ZERO(&set);
@@ -414,6 +419,52 @@ std::vector<uint16_t> TinyModbusRTU::txrx(uint8_t device_address, FunctionCode f
     }
 
     return out;
+}
+
+std::vector<uint8_t> TinyModbusRTU::txrx_raw(const std::vector<uint8_t>& request, bool wait_for_reply,
+                                             std::chrono::milliseconds _initial_timeout,
+                                             std::chrono::milliseconds _within_message_timeout,
+                                             size_t max_reply_bytes) {
+    if (fd == -1) {
+        return {};
+    }
+
+    tcflush(fd, TCIOFLUSH);
+
+    rxtx_gpio.set(false);
+    size_t written = 0;
+    while (written < request.size()) {
+        ssize_t c = write(fd, request.data() + written, request.size() - written);
+        if (c == -1)
+            throw std::system_error(errno, std::generic_category(), "Could not send raw serial request");
+        written += static_cast<size_t>(c);
+    }
+
+    if (rxtx_gpio.is_ready()) {
+        fast_tcdrain(fd);
+    } else {
+        tcdrain(fd);
+    }
+    rxtx_gpio.set(true);
+
+    if (ignore_echo && !request.empty()) {
+        std::vector<uint8_t> echo_buf(request.size());
+        read_raw(echo_buf.data(), static_cast<int>(echo_buf.size()), _within_message_timeout,
+                 _within_message_timeout);
+    }
+
+    if (!wait_for_reply || max_reply_bytes == 0) {
+        return {};
+    }
+
+    std::vector<uint8_t> rxbuf(max_reply_bytes);
+    const int bytes_read_total =
+        read_raw(rxbuf.data(), static_cast<int>(rxbuf.size()), _initial_timeout, _within_message_timeout);
+    if (bytes_read_total <= 0) {
+        return {};
+    }
+    rxbuf.resize(static_cast<size_t>(bytes_read_total));
+    return rxbuf;
 }
 
 std::vector<uint8_t> _make_single_write_request(uint8_t device_address, FunctionCode function,

@@ -142,6 +142,29 @@ cmds:
       description: Status code of the transfer
       type: string
       $ref: /serial_comm_hub_requests#/StatusCodeEnum
+  raw_txrx:
+    description: >-
+      Send raw bytes over the serial interface and return the received bytes
+      (if any). Intended for non-Modbus protocols on the same bus.
+    arguments:
+      tx_bytes:
+        description: Raw bytes to transmit
+        type: object
+        $ref: /serial_comm_hub_requests#/VectorUint8
+      timeout_ms:
+        description: Timeout for receiving reply (0 disables waiting for reply)
+        type: integer
+        minimum: 0
+        maximum: 10000
+      max_rx_bytes:
+        description: Maximum number of bytes to read for reply (0 disables waiting for reply)
+        type: integer
+        minimum: 0
+        maximum: 4096
+    result:
+      description: Result of the transfer
+      type: object
+      $ref: /serial_comm_hub_requests#/ResultRaw
   nonstd_write:
     description: >-
       Non standard mode to write registers in read discrete input mode

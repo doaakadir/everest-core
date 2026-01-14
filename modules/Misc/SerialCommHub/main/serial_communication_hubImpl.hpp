@@ -68,6 +68,9 @@ protected:
     handle_modbus_read_coils(int& target_device_id, int& first_coil_address, int& num_coils_to_read) override;
     virtual types::serial_comm_hub_requests::StatusCodeEnum
     handle_modbus_write_single_coil(int& target_device_id, int& coil_address, bool& data) override;
+    virtual types::serial_comm_hub_requests::ResultRaw
+    handle_raw_txrx(types::serial_comm_hub_requests::VectorUint8& tx_bytes, int& timeout_ms,
+                    int& max_rx_bytes) override;
     virtual void handle_nonstd_write(int& target_device_id, int& first_register_address,
                                      int& num_registers_to_read) override;
     virtual types::serial_comm_hub_requests::Result

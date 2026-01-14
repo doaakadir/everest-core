@@ -97,6 +97,9 @@ public:
     std::vector<uint16_t> txrx(uint8_t device_address, FunctionCode function, uint16_t first_register_address,
                                uint16_t register_quantity, uint16_t chunk_size, bool wait_for_reply = true,
                                std::vector<uint16_t> request = std::vector<uint16_t>());
+    std::vector<uint8_t> txrx_raw(const std::vector<uint8_t>& request, bool wait_for_reply,
+                                  std::chrono::milliseconds initial_timeout,
+                                  std::chrono::milliseconds within_message_timeout, size_t max_reply_bytes);
 
 private:
     // Serial interface
@@ -108,6 +111,8 @@ private:
                                     std::vector<uint16_t> request = std::vector<uint16_t>());
 
     int read_reply(uint8_t* rxbuf, int rxbuf_len);
+    int read_raw(uint8_t* rxbuf, int rxbuf_len, std::chrono::milliseconds initial_timeout,
+                 std::chrono::milliseconds within_message_timeout);
 
     Everest::Gpio rxtx_gpio;
     std::chrono::milliseconds initial_timeout;
