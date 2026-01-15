@@ -53,6 +53,18 @@ static std::vector<int> vector_uint8_to_int(const std::vector<uint8_t>& response
     return out;
 }
 
+static std::string format_hex_bytes(const std::vector<uint8_t>& bytes) {
+    std::string out = "[";
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        out += fmt::format("0x{:02x}", bytes[i]);
+        if (i + 1 < bytes.size()) {
+            out += " ";
+        }
+    }
+    out += "]";
+    return out;
+}
+
 /**
  * @brief Converts a Result to a ResultBool by looking at each bit of the uint16_t values and converting them to
  * bools in the right order. Used for Modbus read coils responses where the result is a bit-packed array of coil states.
@@ -236,9 +248,12 @@ serial_communication_hubImpl::handle_raw_txrx(types::serial_comm_hub_requests::V
 
     try {
         const auto tx = vector_to_uint8(tx_bytes.data);
+        EVLOG_debug << fmt::format("[SerialCommHub][raw_txrx][TX] bytes={} timeout_ms={} max_rx={}",
+                                   format_hex_bytes(tx), timeout, max_rx);
         auto rx = modbus.txrx_raw(tx, wait_for_reply, std::chrono::milliseconds(timeout),
                                   std::chrono::milliseconds(config.within_message_timeout_ms),
                                   static_cast<size_t>(max_rx));
+        EVLOG_debug << fmt::format("[SerialCommHub][raw_txrx][RX] bytes={} len={}", format_hex_bytes(rx), rx.size());
 
         if (!wait_for_reply) {
             result.status_code = types::serial_comm_hub_requests::StatusCodeEnum::Success;
