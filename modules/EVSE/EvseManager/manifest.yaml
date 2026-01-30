@@ -227,6 +227,12 @@ config:
       "EvseManager does not need to wait for energy from the energy manager after plug in."
     type: boolean
     default: false
+  ignore_evse_board_caps_in_dc:
+    description: >-
+      If true, EVSE board support (BSP) hardware caps are not applied to energy management requests in DC mode.
+      This is useful when BSP caps are AC/PWM-derived and would incorrectly limit DC charging.
+    type: boolean
+    default: false
   external_ready_to_start_charging:
     description: Enable the external ready to start charging signal that delays charging ready until it has been received
     type: boolean

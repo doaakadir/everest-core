@@ -95,6 +95,7 @@ struct Conf {
     bool sae_j2847_2_bpt_enabled;
     std::string sae_j2847_2_bpt_mode;
     bool request_zero_power_in_idle;
+    bool ignore_evse_board_caps_in_dc;
     bool external_ready_to_start_charging;
     bool uk_smartcharging_random_delay_enable;
     int uk_smartcharging_random_delay_max_duration;
