@@ -44,6 +44,12 @@ config:
       some OCTT test cases require that the first message after a reconnect is sent by the CSMS.
     type: integer
     default: 0
+  ignore_external_limits:
+    description: >-
+      If true, ignores external limits derived from OCPP SmartCharging (SetChargingProfile / composite schedules)
+      and does not forward them to the energy manager.
+    type: boolean
+    default: false
   RequestCompositeScheduleUnit:
     description: >-
       Unit in which composite schedules are requested and shared within EVerest. It is recommended to use

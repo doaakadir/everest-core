@@ -135,6 +135,10 @@ void create_empty_user_config(const fs::path& user_config_path) {
 }
 
 void OCPP::set_external_limits(const std::map<int32_t, ocpp::v16::EnhancedChargingSchedule>& charging_schedules) {
+    if (config.ignore_external_limits) {
+        EVLOG_warning << "Ignoring OCPP external limits because ignore_external_limits=true";
+        return;
+    }
     const auto start_time = ocpp::DateTime();
 
     // iterate over all schedules reported by the libocpp to create ExternalLimits

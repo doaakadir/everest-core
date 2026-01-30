@@ -75,6 +75,7 @@ struct Conf {
     int PublishChargingScheduleDurationS;
     std::string MessageLogPath;
     int MessageQueueResumeDelay;
+    bool ignore_external_limits;
     std::string RequestCompositeScheduleUnit;
     int DelayOcppStart;
     int ResetStopDelay;
