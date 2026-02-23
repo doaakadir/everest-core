@@ -6,6 +6,7 @@
 #pragma once
 
 #include <functional>
+#include <mutex>
 #include <string>
 
 namespace everest::lib::io::utilities {
@@ -69,6 +70,7 @@ protected:
     void set_error_cleared();
 
 private:
+    mutable std::mutex m_state_mutex;
     bool m_on_error{true};
     bool m_clear_error_pending{false};
     int m_current_error{0};

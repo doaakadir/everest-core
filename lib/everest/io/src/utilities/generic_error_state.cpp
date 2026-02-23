@@ -6,6 +6,7 @@
 namespace everest::lib::io::utilities {
 
 bool generic_error_state::set_error_status(int error_code) {
+    std::lock_guard<std::mutex> lock(m_state_mutex);
     m_current_error = error_code;
     auto on_error = error_code != 0;
     m_clear_error_pending = (not on_error) and m_on_error;
@@ -14,21 +15,31 @@ bool generic_error_state::set_error_status(int error_code) {
 }
 
 bool generic_error_state::clear_error_pending() const {
+    std::lock_guard<std::mutex> lock(m_state_mutex);
     return m_clear_error_pending;
 }
 
 bool generic_error_state::on_error() const {
+    std::lock_guard<std::mutex> lock(m_state_mutex);
     return m_on_error;
 }
 
 int generic_error_state::current_error() const {
+    std::lock_guard<std::mutex> lock(m_state_mutex);
     return m_current_error;
 }
 
 void generic_error_state::call_error_handler(cb_error& handler) const {
-    if (handler) {
-        handler(m_current_error, strerror(m_current_error));
+    if (!handler) {
+        return;
     }
+
+    int current_error_snapshot = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_state_mutex);
+        current_error_snapshot = m_current_error;
+    }
+    handler(current_error_snapshot, strerror(current_error_snapshot));
 }
 
 void generic_error_state::clear_error_handler(cb_error& handler) {
@@ -39,6 +50,7 @@ void generic_error_state::clear_error_handler(cb_error& handler) {
 }
 
 void generic_error_state::set_error_cleared() {
+    std::lock_guard<std::mutex> lock(m_state_mutex);
     m_clear_error_pending = false;
 }
 
