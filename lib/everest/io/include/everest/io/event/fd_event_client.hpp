@@ -14,6 +14,7 @@
 #include <everest/io/utilities/generic_error_state.hpp>
 #include <everest/util/async/monitor.hpp>
 #include <future>
+#include <mutex>
 #include <queue>
 #include <thread>
 #include <type_traits>
@@ -290,7 +291,10 @@ public:
         if (on_error()) {
             return false;
         }
-        m_tx_buffer.emplace(payload);
+        {
+            std::lock_guard<std::mutex> lock(m_tx_buffer_mutex);
+            m_tx_buffer.emplace(payload);
+        }
         m_io_event_fd.notify();
         return true;
     }
@@ -351,11 +355,15 @@ private:
         m_client_status.handle()->fd = false;
         setup_error_event_handler();
         init_device();
-        m_tx_buffer = {};
+        {
+            std::lock_guard<std::mutex> lock(m_tx_buffer_mutex);
+            m_tx_buffer = {};
+        }
         prepare_io_event_handler();
     }
 
     action_status send_one() {
+        std::lock_guard<std::mutex> lock(m_tx_buffer_mutex);
         if (m_tx_buffer.empty()) {
             return action_status::empty;
         }
@@ -396,6 +404,7 @@ private:
     cb_rx m_rx;
     std::function<void()> m_open_device;
     std::queue<ClientPayloadT> m_tx_buffer;
+    std::mutex m_tx_buffer_mutex;
     ClientPayloadT m_data;
 };
 
