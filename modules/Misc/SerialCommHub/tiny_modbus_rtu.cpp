@@ -68,9 +68,14 @@ std::ostream& operator<<(std::ostream& os, const FunctionCode& fc) {
 static void fast_tcdrain(int fd) {
     // in user space, the only way to find out if there are still bits to be shiftet out is to poll line status register
     // as fast as we can
-    uint32_t lsr;
+    uint32_t lsr = 0;
     do {
-        ioctl(fd, TIOCSERGETLSR, &lsr);
+        if (ioctl(fd, TIOCSERGETLSR, &lsr) == -1) {
+            // Some UART drivers do not support the low-latency line status query.
+            // Fall back to tcdrain() so DE is not released before the last byte is shifted out.
+            tcdrain(fd);
+            return;
+        }
     } while (!(lsr & TIOCSER_TEMT));
 }
 
