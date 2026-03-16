@@ -31,6 +31,7 @@ struct Conf {
     int parity;
     bool rtscts;
     bool ignore_echo;
+    bool modbus_frame_autoresync;
     std::string rxtx_gpio_chip;
     int rxtx_gpio_line;
     bool rxtx_gpio_tx_high;

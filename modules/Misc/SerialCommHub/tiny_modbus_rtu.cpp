@@ -18,6 +18,7 @@
 #include <ios>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <ostream>
 #include <sstream>
 #include <string>
@@ -112,8 +113,76 @@ static bool validate_checksum(const uint8_t* msg, int msg_len) {
     return (crc_msg == crc_sum);
 }
 
-static std::vector<uint16_t> decode_reply(const uint8_t* buf, int len, uint8_t expected_device_address,
-                                          FunctionCode function) {
+static std::optional<int> infer_reply_length(const uint8_t* buf, int len, FunctionCode expected_function) {
+    if (len < MODBUS_MIN_REPLY_SIZE) {
+        return std::nullopt;
+    }
+
+    uint8_t function_code_recvd = buf[FUNCTION_CODE_POS];
+    bool exception = check_for_exception(function_code_recvd);
+    if (exception) {
+        clear_exception_bit(function_code_recvd);
+    }
+    if (function_code_recvd != expected_function) {
+        return std::nullopt;
+    }
+
+    if (exception) {
+        return MODBUS_MIN_REPLY_SIZE;
+    }
+
+    switch (expected_function) {
+    case FunctionCode::READ_COILS:
+    case FunctionCode::READ_DISCRETE_INPUTS:
+    case FunctionCode::READ_MULTIPLE_HOLDING_REGISTERS:
+    case FunctionCode::READ_INPUT_REGISTERS:
+        return RES_RX_START_OF_PAYLOAD + static_cast<int>(buf[RES_RX_LEN_POS]) + 2;
+    case FunctionCode::WRITE_SINGLE_COIL:
+    case FunctionCode::WRITE_SINGLE_HOLDING_REGISTER:
+    case FunctionCode::WRITE_MULTIPLE_COILS:
+    case FunctionCode::WRITE_MULTIPLE_HOLDING_REGISTERS:
+        return MODBUS_BASE_PAYLOAD_SIZE;
+    default:
+        return std::nullopt;
+    }
+}
+
+struct ReplyFrameView {
+    const uint8_t* data;
+    int len;
+    int offset;
+};
+
+static std::optional<ReplyFrameView> find_reply_frame(const uint8_t* buf, int len, uint8_t expected_device_address,
+                                                      FunctionCode function) {
+    if (len < MODBUS_MIN_REPLY_SIZE) {
+        return std::nullopt;
+    }
+
+    for (int offset = 0; offset <= len - MODBUS_MIN_REPLY_SIZE; ++offset) {
+        if (buf[offset] != expected_device_address) {
+            continue;
+        }
+
+        const auto expected_len = infer_reply_length(buf + offset, len - offset, function);
+        if (!expected_len.has_value()) {
+            continue;
+        }
+        if (*expected_len > len - offset) {
+            continue;
+        }
+        if (!validate_checksum(buf + offset, *expected_len)) {
+            continue;
+        }
+
+        return ReplyFrameView{buf + offset, *expected_len, offset};
+    }
+
+    return std::nullopt;
+}
+
+static std::vector<uint16_t> decode_reply_strict(const uint8_t* buf, int len, uint8_t expected_device_address,
+                                                 FunctionCode function) {
     std::vector<uint16_t> result;
     if (len == 0) {
         throw TimeoutException("Packet receive timeout");
@@ -241,12 +310,30 @@ static std::vector<uint16_t> decode_reply(const uint8_t* buf, int len, uint8_t e
     return result;
 }
 
+static std::vector<uint16_t> decode_reply(const uint8_t* buf, int len, uint8_t expected_device_address,
+                                          FunctionCode function, bool modbus_frame_autoresync) {
+    if (modbus_frame_autoresync) {
+        const auto frame = find_reply_frame(buf, len, expected_device_address, function);
+        if (frame.has_value()) {
+            if (frame->offset != 0 || frame->len != len) {
+                EVLOG_debug << fmt::format(
+                    "Recovered Modbus reply by skipping {} leading and {} trailing bytes: {}",
+                    frame->offset, len - frame->offset - frame->len, hexdump(buf, len));
+            }
+            return decode_reply_strict(frame->data, frame->len, expected_device_address, function);
+        }
+    }
+
+    return decode_reply_strict(buf, len, expected_device_address, function);
+}
+
 TinyModbusRTU::~TinyModbusRTU() {
     if (fd != -1)
         close(fd);
 }
 
 bool TinyModbusRTU::open_device(const std::string& device, int _baud, bool _ignore_echo,
+                                bool _modbus_frame_autoresync,
                                 const Everest::GpioSettings& rxtx_gpio_settings, const Parity parity, bool rtscts,
                                 std::chrono::milliseconds _initial_timeout,
                                 std::chrono::milliseconds _within_message_timeout) {
@@ -254,6 +341,7 @@ bool TinyModbusRTU::open_device(const std::string& device, int _baud, bool _igno
     initial_timeout = _initial_timeout;
     within_message_timeout = _within_message_timeout;
     ignore_echo = _ignore_echo;
+    modbus_frame_autoresync = _modbus_frame_autoresync;
 
     rxtx_gpio.open(rxtx_gpio_settings);
     rxtx_gpio.set_output(true);
@@ -574,7 +662,7 @@ std::vector<uint16_t> TinyModbusRTU::txrx_impl(uint8_t device_address, FunctionC
         // wait for reply
         uint8_t rxbuf[MODBUS_MAX_REPLY_SIZE];
         int bytes_read_total = read_reply(rxbuf, sizeof(rxbuf));
-        return decode_reply(rxbuf, bytes_read_total, device_address, function);
+        return decode_reply(rxbuf, bytes_read_total, device_address, function, modbus_frame_autoresync);
     }
     return std::vector<uint16_t>();
 }

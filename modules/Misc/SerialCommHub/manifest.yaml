@@ -28,6 +28,10 @@ provides:
         description: On some hardware every message that is sent is read back, this setting filters the sent message in the reply.
         type: boolean
         default: false
+      modbus_frame_autoresync:
+        description: Try to recover a valid Modbus reply from within a larger RX buffer by skipping leading or trailing bytes.
+        type: boolean
+        default: false
       rxtx_gpio_chip:
         description: GPIO chip to use to switch between RX/TX. An empty string disables GPIO usage.
         type: string

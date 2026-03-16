@@ -8,6 +8,7 @@
 #define TINY_MODBUS_RTU
 
 #include <chrono>
+#include <optional>
 #include <ostream>
 #include <stdexcept>
 #include <stdint.h>
@@ -90,7 +91,7 @@ class TinyModbusRTU {
 public:
     ~TinyModbusRTU();
 
-    bool open_device(const std::string& device, int baud, bool ignore_echo,
+    bool open_device(const std::string& device, int baud, bool ignore_echo, bool modbus_frame_autoresync,
                      const Everest::GpioSettings& rxtx_gpio_settings, const Parity parity, bool rtscts,
                      std::chrono::milliseconds initial_timeout, std::chrono::milliseconds within_message_timeout);
 
@@ -105,6 +106,7 @@ private:
     // Serial interface
     int fd{-1};
     bool ignore_echo{false};
+    bool modbus_frame_autoresync{false};
 
     std::vector<uint16_t> txrx_impl(uint8_t device_address, FunctionCode function, uint16_t first_register_address,
                                     uint16_t register_quantity, bool wait_for_reply = true,

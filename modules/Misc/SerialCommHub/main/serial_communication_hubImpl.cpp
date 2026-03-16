@@ -118,7 +118,8 @@ void serial_communication_hubImpl::init() {
 
     system_error_logged = false;
 
-    if (!modbus.open_device(config.serial_port, config.baudrate, config.ignore_echo, rxtx_gpio_settings,
+    if (!modbus.open_device(config.serial_port, config.baudrate, config.ignore_echo,
+                            config.modbus_frame_autoresync, rxtx_gpio_settings,
                             static_cast<tiny_modbus::Parity>(config.parity), config.rtscts,
                             milliseconds(config.initial_timeout_ms), milliseconds(config.within_message_timeout_ms))) {
         EVLOG_error << fmt::format("Cannot open serial port {}, ModBus will not work.", config.serial_port);
