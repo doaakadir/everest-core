@@ -47,6 +47,7 @@ bool Channel::read(slac::messages::HomeplugMessage& msg, int timeout) {
             did_timeout = true;
             return false;
         case IOResult::Ok:
+            msg.set_raw_msg_len(socket->get_last_read_size());
             return true;
         }
     }
