@@ -41,7 +41,12 @@ inline std::pair<const uint8_t*, size_t> get_message_payload_view(slac::messages
 
     const auto* payload_begin = reinterpret_cast<const uint8_t*>(payload);
     const auto* frame_begin = reinterpret_cast<const uint8_t*>(raw_message);
-    const auto payload_len = static_cast<size_t>(frame_begin + message.get_raw_msg_len() - payload_begin);
+    const auto raw_len = std::max(message.get_raw_msg_len(), 0);
+    const auto payload_offset = static_cast<size_t>(payload_begin - frame_begin);
+    if (static_cast<size_t>(raw_len) <= payload_offset) {
+        return {payload_begin, 0};
+    }
+    const auto payload_len = static_cast<size_t>(raw_len) - payload_offset;
 
     return {payload_begin, payload_len};
 }
@@ -151,6 +156,7 @@ inline void append_hex_dump(std::string& result, const uint8_t* data, const size
 
 inline std::string get_qualcomm_device_info_debug(slac::messages::HomeplugMessage& message) {
     const auto [payload_ptr, payload_len] = get_message_payload_view(message);
+    const auto raw_msg_len = std::max(message.get_raw_msg_len(), 0);
 
     slac::messages::qualcomm::op_attr_cnf msg{};
     const auto copied_len = std::min(payload_len, sizeof(msg));
@@ -176,14 +182,15 @@ inline std::string get_qualcomm_device_info_debug(slac::messages::HomeplugMessag
     result += "\n  Raw OP_ATTR payload bytes (" + std::to_string(payload_len) + " bytes):";
     append_hex_dump(result, payload_ptr, payload_len);
 
-    result += "\n  Raw HomePlug frame bytes (" + std::to_string(message.get_raw_msg_len()) + " bytes):";
-    append_hex_dump(result, reinterpret_cast<const uint8_t*>(message.get_raw_message_ptr()), message.get_raw_msg_len());
+    result += "\n  Raw HomePlug frame bytes (" + std::to_string(raw_msg_len) + " bytes):";
+    append_hex_dump(result, reinterpret_cast<const uint8_t*>(message.get_raw_message_ptr()), raw_msg_len);
 
     return result;
 }
 
 inline std::string get_qualcomm_nw_info_debug(slac::messages::HomeplugMessage& message) {
     const auto [payload_ptr, payload_len] = get_message_payload_view(message);
+    const auto raw_msg_len = std::max(message.get_raw_msg_len(), 0);
 
     std::string result("Qualcomm PLC Network Info:");
     result += "\n  MMType: 0x";
@@ -195,8 +202,8 @@ inline std::string get_qualcomm_nw_info_debug(slac::messages::HomeplugMessage& m
     result += "\n  Raw NW_INFO payload bytes (" + std::to_string(payload_len) + " bytes):";
     append_hex_dump(result, payload_ptr, payload_len);
 
-    result += "\n  Raw HomePlug frame bytes (" + std::to_string(message.get_raw_msg_len()) + " bytes):";
-    append_hex_dump(result, reinterpret_cast<const uint8_t*>(message.get_raw_message_ptr()), message.get_raw_msg_len());
+    result += "\n  Raw HomePlug frame bytes (" + std::to_string(raw_msg_len) + " bytes):";
+    append_hex_dump(result, reinterpret_cast<const uint8_t*>(message.get_raw_message_ptr()), raw_msg_len);
 
     return result;
 }
