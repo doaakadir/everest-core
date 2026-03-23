@@ -194,6 +194,7 @@ struct EvseSlacConfig {
     int request_info_delay_ms = 100;
 
     bool qualcomm_op_attr_polling{false};
+    int qualcomm_op_attr_poll_interval_s{10};
 
     // offset for adjusting the calculated sounding attenuation
     int sounding_atten_adjustment = 0;

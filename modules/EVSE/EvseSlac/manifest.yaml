@@ -67,10 +67,15 @@ provides:
         default: 10000
       qualcomm_op_attr_polling:
         description: >-
-          Periodically request Qualcomm OP_ATTR device attributes every 10 seconds and log the reply.
+          Periodically request Qualcomm OP_ATTR device attributes and log the reply.
           This is only active after a Qualcomm modem has been detected.
         type: boolean
         default: false
+      qualcomm_op_attr_poll_interval_s:
+        description: Interval in seconds for periodic Qualcomm OP_ATTR requests.
+        type: integer
+        default: 10
+        minimum: 1
       debug_simulate_failed_matching:
         description: Only for debugging. Simulate failed matching by sending a wrong NMK to the EV.
         type: boolean

@@ -18,6 +18,12 @@ bool FSMController::should_poll_qualcomm_op_attr() const {
            ctx.internal_state == slac::fsm::evse::InternalState::Matched;
 }
 
+std::chrono::seconds FSMController::get_qualcomm_op_attr_poll_interval() const {
+    const auto interval_s =
+        ctx.slac_config.qualcomm_op_attr_poll_interval_s > 0 ? ctx.slac_config.qualcomm_op_attr_poll_interval_s : 1;
+    return std::chrono::seconds(interval_s);
+}
+
 void FSMController::poll_qualcomm_op_attr() {
     slac::messages::qualcomm::op_attr_req op_attr_req;
     ctx.send_slac_message(ctx.slac_config.plc_peer_mac, op_attr_req);
@@ -74,7 +80,7 @@ void FSMController::run() {
     std::unique_lock<std::mutex> feed_lck(feed_mtx);
 
     running = true;
-    next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + qualcomm_op_attr_poll_interval;
+    next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + get_qualcomm_op_attr_poll_interval();
 
     while (true) {
         auto feed_result = fsm.feed();
@@ -111,7 +117,7 @@ void FSMController::run() {
                     if (should_poll_qualcomm_op_attr()) {
                         poll_qualcomm_op_attr();
                     }
-                    next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + qualcomm_op_attr_poll_interval;
+                    next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + get_qualcomm_op_attr_poll_interval();
                 }
                 continue;
             }
@@ -129,7 +135,7 @@ void FSMController::run() {
             if (should_poll_qualcomm_op_attr()) {
                 poll_qualcomm_op_attr();
             }
-            next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + qualcomm_op_attr_poll_interval;
+            next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + get_qualcomm_op_attr_poll_interval();
         }
     }
 }

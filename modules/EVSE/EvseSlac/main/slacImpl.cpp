@@ -87,6 +87,7 @@ void slacImpl::run() {
     fsm_ctx.slac_config.link_status.retry_ms = config.link_status_retry_ms;
     fsm_ctx.slac_config.link_status.timeout_ms = config.link_status_timeout_ms;
     fsm_ctx.slac_config.qualcomm_op_attr_polling = config.qualcomm_op_attr_polling;
+    fsm_ctx.slac_config.qualcomm_op_attr_poll_interval_s = config.qualcomm_op_attr_poll_interval_s;
     fsm_ctx.slac_config.link_status.debug_simulate_failed_matching = config.debug_simulate_failed_matching;
 
     fsm_ctx.slac_config.reset_instead_of_fail = config.reset_instead_of_fail;
