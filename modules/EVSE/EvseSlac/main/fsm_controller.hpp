@@ -22,8 +22,10 @@ public:
 private:
     bool signal_simple_event(slac::fsm::evse::Event ev);
     bool should_poll_qualcomm_op_attr() const;
+    bool should_poll_qualcomm_nw_info() const;
     std::chrono::seconds get_qualcomm_op_attr_poll_interval() const;
     void poll_qualcomm_op_attr();
+    void poll_qualcomm_nw_info();
     slac::fsm::evse::Context& ctx;
     slac::fsm::evse::FSM fsm;
 

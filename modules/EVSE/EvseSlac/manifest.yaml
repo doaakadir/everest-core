@@ -76,6 +76,10 @@ provides:
         type: integer
         default: 10
         minimum: 1
+      qualcomm_nw_info_polling:
+        description: Periodically request Qualcomm NW_INFO and log the raw reply.
+        type: boolean
+        default: false
       debug_simulate_failed_matching:
         description: Only for debugging. Simulate failed matching by sending a wrong NMK to the EV.
         type: boolean

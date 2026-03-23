@@ -359,8 +359,7 @@ FSMSimpleState::CallbackReturnType InitState::callback() {
 void InitState::handle_slac_message(slac::messages::HomeplugMessage& message) {
     const auto mmtype = message.get_mmtype();
     if (mmtype == (slac::defs::qualcomm::MMTYPE_OP_ATTR | slac::defs::MMTYPE_MODE_CNF)) {
-        const auto msg = message.get_payload<slac::messages::qualcomm::op_attr_cnf>();
-        const auto device_info = get_qualcomm_device_info(msg);
+        const auto device_info = get_qualcomm_device_info_debug(message);
         ctx.log_info(device_info);
         // This message is only supported on Qualcomm, so we can use it to detect the Vendor
         ctx.modem_vendor = ModemVendor::Qualcomm;

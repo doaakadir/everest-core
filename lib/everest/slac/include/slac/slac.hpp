@@ -359,6 +359,10 @@ typedef struct {
 } __attribute__((packed)) op_attr_req;
 
 typedef struct {
+    uint8_t vendor_mme[3] = {0x00, 0xb0, 0x52}; // Qualcomm Vendor MME code
+} __attribute__((packed)) nw_info_req;
+
+typedef struct {
     uint8_t vendor_mme[3]; // Vendor MME code
     uint16_t success;      // 0x00 means success
     uint32_t cookie;

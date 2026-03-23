@@ -53,6 +53,10 @@ template <> struct MMTYPE<slac::messages::qualcomm::op_attr_cnf> {
     static const uint16_t value = slac::defs::qualcomm::MMTYPE_OP_ATTR | slac::defs::MMTYPE_MODE_CNF;
 };
 
+template <> struct MMTYPE<slac::messages::qualcomm::nw_info_req> {
+    static const uint16_t value = slac::defs::qualcomm::MMTYPE_NW_INFO | slac::defs::MMTYPE_MODE_REQ;
+};
+
 // This message has no CNF counterpart
 template <> struct MMTYPE<slac::messages::lumissil::nscm_reset_device_req> {
     static const uint16_t value = slac::defs::lumissil::MMTYPE_NSCM_RESET_DEVICE | slac::defs::MMTYPE_MODE_REQ;
@@ -104,6 +108,10 @@ template <> struct MMV<slac::messages::qualcomm::op_attr_req> {
 };
 
 template <> struct MMV<slac::messages::qualcomm::op_attr_cnf> {
+    static constexpr auto value = slac::defs::MMV::AV_1_0;
+};
+
+template <> struct MMV<slac::messages::qualcomm::nw_info_req> {
     static constexpr auto value = slac::defs::MMV::AV_1_0;
 };
 
@@ -195,6 +203,7 @@ struct EvseSlacConfig {
 
     bool qualcomm_op_attr_polling{false};
     int qualcomm_op_attr_poll_interval_s{10};
+    bool qualcomm_nw_info_polling{false};
 
     // offset for adjusting the calculated sounding attenuation
     int sounding_atten_adjustment = 0;

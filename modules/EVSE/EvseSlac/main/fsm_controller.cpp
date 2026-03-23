@@ -18,6 +18,15 @@ bool FSMController::should_poll_qualcomm_op_attr() const {
            ctx.internal_state == slac::fsm::evse::InternalState::Matched;
 }
 
+bool FSMController::should_poll_qualcomm_nw_info() const {
+    if (!ctx.slac_config.qualcomm_nw_info_polling || ctx.modem_vendor != slac::fsm::evse::ModemVendor::Qualcomm) {
+        return false;
+    }
+
+    return ctx.internal_state == slac::fsm::evse::InternalState::Idle ||
+           ctx.internal_state == slac::fsm::evse::InternalState::Matched;
+}
+
 std::chrono::seconds FSMController::get_qualcomm_op_attr_poll_interval() const {
     const auto interval_s =
         ctx.slac_config.qualcomm_op_attr_poll_interval_s > 0 ? ctx.slac_config.qualcomm_op_attr_poll_interval_s : 1;
@@ -29,6 +38,11 @@ void FSMController::poll_qualcomm_op_attr() {
     ctx.send_slac_message(ctx.slac_config.plc_peer_mac, op_attr_req);
 }
 
+void FSMController::poll_qualcomm_nw_info() {
+    slac::messages::qualcomm::nw_info_req nw_info_req;
+    ctx.send_slac_message(ctx.slac_config.plc_peer_mac, nw_info_req);
+}
+
 void FSMController::signal_new_slac_message(slac::messages::HomeplugMessage& msg) {
     if (running == false) {
         return;
@@ -36,11 +50,16 @@ void FSMController::signal_new_slac_message(slac::messages::HomeplugMessage& msg
     {
         const std::lock_guard<std::mutex> feed_lck(feed_mtx);
         const auto mmtype = msg.get_mmtype();
-        if (should_poll_qualcomm_op_attr() &&
+        if (ctx.slac_config.qualcomm_op_attr_polling &&
+            ctx.modem_vendor == slac::fsm::evse::ModemVendor::Qualcomm &&
             mmtype == (slac::defs::qualcomm::MMTYPE_OP_ATTR | slac::defs::MMTYPE_MODE_CNF)) {
-            const auto device_info = slac::fsm::evse::get_qualcomm_device_info(
-                msg.get_payload<slac::messages::qualcomm::op_attr_cnf>());
+            const auto device_info = slac::fsm::evse::get_qualcomm_device_info_debug(msg);
             ctx.log_info(device_info);
+        } else if (ctx.slac_config.qualcomm_nw_info_polling &&
+                   ctx.modem_vendor == slac::fsm::evse::ModemVendor::Qualcomm &&
+                   mmtype == (slac::defs::qualcomm::MMTYPE_NW_INFO | slac::defs::MMTYPE_MODE_CNF)) {
+            const auto nw_info = slac::fsm::evse::get_qualcomm_nw_info_debug(msg);
+            ctx.log_info(nw_info);
         }
         ctx.slac_message_payload = msg;
         fsm.handle_event(slac::fsm::evse::Event::SLAC_MESSAGE);
@@ -97,7 +116,7 @@ void FSMController::run() {
             wait_timeout = std::chrono::milliseconds(*feed_result);
         }
 
-        if (ctx.slac_config.qualcomm_op_attr_polling) {
+        if (ctx.slac_config.qualcomm_op_attr_polling || ctx.slac_config.qualcomm_nw_info_polling) {
             const auto now = std::chrono::steady_clock::now();
             const auto poll_timeout =
                 next_qualcomm_op_attr_poll > now
@@ -112,10 +131,13 @@ void FSMController::run() {
         if (wait_timeout.has_value()) {
             const auto timeout = wait_timeout->count();
             if (timeout == 0) {
-                if (ctx.slac_config.qualcomm_op_attr_polling &&
+                if ((ctx.slac_config.qualcomm_op_attr_polling || ctx.slac_config.qualcomm_nw_info_polling) &&
                     std::chrono::steady_clock::now() >= next_qualcomm_op_attr_poll) {
                     if (should_poll_qualcomm_op_attr()) {
                         poll_qualcomm_op_attr();
+                    }
+                    if (should_poll_qualcomm_nw_info()) {
+                        poll_qualcomm_nw_info();
                     }
                     next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + get_qualcomm_op_attr_poll_interval();
                 }
@@ -130,10 +152,13 @@ void FSMController::run() {
         if (new_event) {
             // we got a new event, reset it and let run feed again
             new_event = false;
-        } else if (ctx.slac_config.qualcomm_op_attr_polling &&
+        } else if ((ctx.slac_config.qualcomm_op_attr_polling || ctx.slac_config.qualcomm_nw_info_polling) &&
                    std::chrono::steady_clock::now() >= next_qualcomm_op_attr_poll) {
             if (should_poll_qualcomm_op_attr()) {
                 poll_qualcomm_op_attr();
+            }
+            if (should_poll_qualcomm_nw_info()) {
+                poll_qualcomm_nw_info();
             }
             next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + get_qualcomm_op_attr_poll_interval();
         }
