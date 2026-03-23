@@ -4,6 +4,7 @@
 #define EVSE_SLAC_DEVICE_INFO_HPP
 
 #include <algorithm>
+#include <cstring>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -149,9 +150,21 @@ inline void append_hex_dump(std::string& result, const uint8_t* data, const size
 }
 
 inline std::string get_qualcomm_device_info_debug(slac::messages::HomeplugMessage& message) {
-    const auto& msg = message.get_payload<slac::messages::qualcomm::op_attr_cnf>();
+    const auto [payload_ptr, payload_len] = get_message_payload_view(message);
+
+    slac::messages::qualcomm::op_attr_cnf msg{};
+    const auto copied_len = std::min(payload_len, sizeof(msg));
+    std::memcpy(&msg, payload_ptr, copied_len);
 
     std::string result = get_qualcomm_device_info(msg);
+    result += "\n  OP_ATTR payload length: ";
+    result += std::to_string(payload_len);
+    result += " bytes";
+    if (payload_len < sizeof(msg)) {
+        result += " (shorter than expected ";
+        result += std::to_string(sizeof(msg));
+        result += " bytes)";
+    }
 
     std::ostringstream line_freq;
     line_freq << std::hex << std::uppercase << std::setfill('0');
@@ -160,7 +173,6 @@ inline std::string get_qualcomm_device_info_debug(slac::messages::HomeplugMessag
     line_freq << ", freq_bits=0x" << std::setw(1) << static_cast<unsigned>(msg.line_freq_zc & 0x03) << ")";
     result += line_freq.str();
 
-    const auto [payload_ptr, payload_len] = get_message_payload_view(message);
     result += "\n  Raw OP_ATTR payload bytes (" + std::to_string(payload_len) + " bytes):";
     append_hex_dump(result, payload_ptr, payload_len);
 
