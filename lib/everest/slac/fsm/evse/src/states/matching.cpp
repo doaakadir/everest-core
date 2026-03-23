@@ -58,6 +58,7 @@ bool all_sessions_failed(const std::vector<MatchingSession>& sessions) {
 // Matching state related
 //
 void MatchingState::enter() {
+    ctx.internal_state = InternalState::Matching;
     ctx.signal_state("MATCHING");
     ctx.log_info("Entered Matching state, waiting for CM_SLAC_PARM_REQ");
     // timeout for getting CM_SLAC_PARM_REQ

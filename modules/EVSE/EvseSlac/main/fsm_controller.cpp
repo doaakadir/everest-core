@@ -2,9 +2,26 @@
 // Copyright 2023 - 2023 Pionix GmbH and Contributors to EVerest
 #include "fsm_controller.hpp"
 
+#include <everest/slac/fsm/evse/device_info.hpp>
 #include <everest/slac/fsm/evse/states/others.hpp>
 
+#include <optional>
+
 FSMController::FSMController(slac::fsm::evse::Context& context) : ctx(context){};
+
+bool FSMController::should_poll_qualcomm_op_attr() const {
+    if (!ctx.slac_config.qualcomm_op_attr_polling || ctx.modem_vendor != slac::fsm::evse::ModemVendor::Qualcomm) {
+        return false;
+    }
+
+    return ctx.internal_state == slac::fsm::evse::InternalState::Idle ||
+           ctx.internal_state == slac::fsm::evse::InternalState::Matched;
+}
+
+void FSMController::poll_qualcomm_op_attr() {
+    slac::messages::qualcomm::op_attr_req op_attr_req;
+    ctx.send_slac_message(ctx.slac_config.plc_peer_mac, op_attr_req);
+}
 
 void FSMController::signal_new_slac_message(slac::messages::HomeplugMessage& msg) {
     if (running == false) {
@@ -12,6 +29,13 @@ void FSMController::signal_new_slac_message(slac::messages::HomeplugMessage& msg
     }
     {
         const std::lock_guard<std::mutex> feed_lck(feed_mtx);
+        const auto mmtype = msg.get_mmtype();
+        if (should_poll_qualcomm_op_attr() &&
+            mmtype == (slac::defs::qualcomm::MMTYPE_OP_ATTR | slac::defs::MMTYPE_MODE_CNF)) {
+            const auto device_info = slac::fsm::evse::get_qualcomm_device_info(
+                msg.get_payload<slac::messages::qualcomm::op_attr_cnf>());
+            ctx.log_info(device_info);
+        }
         ctx.slac_message_payload = msg;
         fsm.handle_event(slac::fsm::evse::Event::SLAC_MESSAGE);
     }
@@ -50,6 +74,7 @@ void FSMController::run() {
     std::unique_lock<std::mutex> feed_lck(feed_mtx);
 
     running = true;
+    next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + qualcomm_op_attr_poll_interval;
 
     while (true) {
         auto feed_result = fsm.feed();
@@ -59,10 +84,35 @@ void FSMController::run() {
             continue;
         } else if (feed_result.internal_error() || feed_result.unhandled_event()) {
             // FIXME (aw): would need to log here!
-        } else if (feed_result.has_value() == true) {
-            const auto timeout = *feed_result;
+        }
+
+        std::optional<std::chrono::milliseconds> wait_timeout;
+        if (feed_result.has_value() == true) {
+            wait_timeout = std::chrono::milliseconds(*feed_result);
+        }
+
+        if (ctx.slac_config.qualcomm_op_attr_polling) {
+            const auto now = std::chrono::steady_clock::now();
+            const auto poll_timeout =
+                next_qualcomm_op_attr_poll > now
+                    ? std::chrono::duration_cast<std::chrono::milliseconds>(next_qualcomm_op_attr_poll - now)
+                    : std::chrono::milliseconds(0);
+
+            if (!wait_timeout.has_value() || poll_timeout < *wait_timeout) {
+                wait_timeout = poll_timeout;
+            }
+        }
+
+        if (wait_timeout.has_value()) {
+            const auto timeout = wait_timeout->count();
             if (timeout == 0) {
-                // call feed directly again
+                if (ctx.slac_config.qualcomm_op_attr_polling &&
+                    std::chrono::steady_clock::now() >= next_qualcomm_op_attr_poll) {
+                    if (should_poll_qualcomm_op_attr()) {
+                        poll_qualcomm_op_attr();
+                    }
+                    next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + qualcomm_op_attr_poll_interval;
+                }
                 continue;
             }
             new_event_cv.wait_for(feed_lck, std::chrono::milliseconds(timeout), [this] { return new_event; });
@@ -74,6 +124,12 @@ void FSMController::run() {
         if (new_event) {
             // we got a new event, reset it and let run feed again
             new_event = false;
+        } else if (ctx.slac_config.qualcomm_op_attr_polling &&
+                   std::chrono::steady_clock::now() >= next_qualcomm_op_attr_poll) {
+            if (should_poll_qualcomm_op_attr()) {
+                poll_qualcomm_op_attr();
+            }
+            next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + qualcomm_op_attr_poll_interval;
         }
     }
 }

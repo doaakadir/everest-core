@@ -5,6 +5,7 @@
 
 #include <everest/slac/fsm/evse/fsm.hpp>
 
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
 
@@ -19,7 +20,11 @@ public:
     void run();
 
 private:
+    static constexpr auto qualcomm_op_attr_poll_interval = std::chrono::seconds(10);
+
     bool signal_simple_event(slac::fsm::evse::Event ev);
+    bool should_poll_qualcomm_op_attr() const;
+    void poll_qualcomm_op_attr();
     slac::fsm::evse::Context& ctx;
     slac::fsm::evse::FSM fsm;
 
@@ -28,6 +33,7 @@ private:
     std::mutex feed_mtx;
     std::condition_variable new_event_cv;
     bool new_event{false};
+    std::chrono::steady_clock::time_point next_qualcomm_op_attr_poll{};
 };
 
 #endif // EVSE_SLAC_FSM_CONTROLLER_HPP

@@ -33,6 +33,7 @@ struct Conf {
     bool link_status_detection;
     int link_status_retry_ms;
     int link_status_timeout_ms;
+    bool qualcomm_op_attr_polling;
     bool debug_simulate_failed_matching;
     bool reset_instead_of_fail;
 };

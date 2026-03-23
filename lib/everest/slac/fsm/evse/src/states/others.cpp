@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2023 - 2023 Pionix GmbH and Contributors to EVerest
 #include <everest/slac/fsm/evse/states/others.hpp>
+#include <everest/slac/fsm/evse/device_info.hpp>
 
 #include <cstring>
 #include <optional>
-#include <string_view>
 
 #include <everest/slac/fsm/evse/states/matching.hpp>
 
@@ -30,6 +30,7 @@ static auto create_cm_set_key_req(uint8_t const* session_nmk) {
 }
 
 void ResetState::enter() {
+    ctx.internal_state = InternalState::Reset;
     ctx.log_info("Entered Reset state");
     ctx.slac_config.generate_nmk();
 }
@@ -87,6 +88,7 @@ bool ResetState::handle_slac_message(slac::messages::HomeplugMessage& message) {
 }
 
 void ResetChipState::enter() {
+    ctx.internal_state = InternalState::Reset;
     ctx.log_info("Entered HW Chip Reset state");
 }
 
@@ -150,6 +152,7 @@ bool ResetChipState::handle_slac_message(slac::messages::HomeplugMessage& messag
 }
 
 void IdleState::enter() {
+    ctx.internal_state = InternalState::Idle;
     ctx.signal_state("UNMATCHED");
     ctx.log_info("Entered Idle state");
 }
@@ -196,6 +199,7 @@ static bool send_link_status_req(slac::fsm::evse::Context& ctx) {
 }
 
 void MatchedState::enter() {
+    ctx.internal_state = InternalState::Matched;
     ctx.signal_state("MATCHED");
     ctx.signal_dlink_ready(true);
     ctx.log_info("Entered Matched state");
@@ -241,6 +245,7 @@ void MatchedState::leave() {
 }
 
 void FailedState::enter() {
+    ctx.internal_state = InternalState::Failed;
     if (ctx.slac_config.ac_mode_five_percent) {
         ctx.signal_error_routine_request();
     }
@@ -256,6 +261,7 @@ FSMSimpleState::HandleEventReturnType FailedState::handle_event(AllocatorType& s
 }
 
 void WaitForLinkState::enter() {
+    ctx.internal_state = InternalState::WaitForLink;
     ctx.log_info("Waiting for Link to be ready...");
     start_time = std::chrono::steady_clock::now();
 }
@@ -348,55 +354,6 @@ FSMSimpleState::CallbackReturnType InitState::callback() {
         return Event::SUCCESS;
     }
     return {};
-}
-
-static std::string get_qualcomm_device_info(slac::messages::qualcomm::op_attr_cnf const& msg) {
-    const auto get_string_view = [](auto const& raw) constexpr {
-        static_assert(sizeof(uint8_t) == sizeof(char));
-        return std::string_view(reinterpret_cast<char const*>(raw), sizeof(raw));
-    };
-
-    std::string result("Qualcomm PLC Device Attributes:");
-    result += "\n  HW Platform: ";
-    result += get_string_view(msg.hw_platform);
-    result += "\n  SW Platform: ";
-    result += get_string_view(msg.sw_platform);
-    result += ("\n  Firmware: " + std::to_string(msg.version_major) + "." + std::to_string(msg.version_minor) + "." +
-               std::to_string(msg.version_pib) + "." + std::to_string(msg.reserved) + "-" +
-               std::to_string(msg.version_build));
-    result += "\n  Build date: ";
-    result += get_string_view(msg.build_date);
-
-    result += "\n  ZC signal: ";
-
-    // FIXME: no magic numbers
-    const auto zc_signal = (msg.line_freq_zc >> 2) & 0x03;
-    if (zc_signal == 0x01) {
-        result += "Detected";
-    } else if (zc_signal == 0x02) {
-        result += "Missing";
-    } else {
-        result += ("Unknown (" + std::to_string(zc_signal) + ")");
-    }
-
-    result += "\n  Line frequency: ";
-
-    const auto line_freq = (msg.line_freq_zc) & 0x03;
-    if (line_freq == 0x01) {
-        result += "50Hz";
-    } else if (line_freq == 0x02) {
-        result += "60Hz";
-    } else {
-        result += ("Unknown (" + std::to_string(line_freq) + ")");
-    }
-
-    return result;
-}
-
-static std::string get_lumissil_device_info(slac::messages::lumissil::nscm_get_version_cnf const& msg) {
-    return "Lumissil PLC Device Firmware version: " + std::to_string(msg.version_major) + "." +
-           std::to_string(msg.version_minor) + "." + std::to_string(msg.version_patch) + "." +
-           std::to_string(msg.version_build);
 }
 
 void InitState::handle_slac_message(slac::messages::HomeplugMessage& message) {

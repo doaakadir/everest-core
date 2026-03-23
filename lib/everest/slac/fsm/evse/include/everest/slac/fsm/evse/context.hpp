@@ -137,6 +137,16 @@ enum class ModemVendor {
     VertexCom,
 };
 
+enum class InternalState {
+    Unknown,
+    Reset,
+    Idle,
+    Matching,
+    WaitForLink,
+    Matched,
+    Failed,
+};
+
 struct ContextCallbacks {
     std::function<void(slac::messages::HomeplugMessage&)> send_raw_slac{nullptr};
     std::function<void(const std::string&)> signal_state{nullptr};
@@ -183,6 +193,8 @@ struct EvseSlacConfig {
 
     int request_info_delay_ms = 100;
 
+    bool qualcomm_op_attr_polling{false};
+
     // offset for adjusting the calculated sounding attenuation
     int sounding_atten_adjustment = 0;
 
@@ -221,6 +233,7 @@ struct Context {
     void log_error(const std::string& text);
 
     ModemVendor modem_vendor{ModemVendor::Unknown};
+    InternalState internal_state{InternalState::Unknown};
     uint8_t evse_mac[ETH_ALEN];
 
 private:
