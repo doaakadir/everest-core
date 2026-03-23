@@ -89,6 +89,7 @@ void slacImpl::run() {
     fsm_ctx.slac_config.qualcomm_op_attr_polling = config.qualcomm_op_attr_polling;
     fsm_ctx.slac_config.qualcomm_op_attr_poll_interval_s = config.qualcomm_op_attr_poll_interval_s;
     fsm_ctx.slac_config.qualcomm_nw_info_polling = config.qualcomm_nw_info_polling;
+    fsm_ctx.slac_config.qualcomm_debug_dump_max_bytes = config.qualcomm_debug_dump_max_bytes;
     fsm_ctx.slac_config.link_status.debug_simulate_failed_matching = config.debug_simulate_failed_matching;
 
     fsm_ctx.slac_config.reset_instead_of_fail = config.reset_instead_of_fail;

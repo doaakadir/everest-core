@@ -53,12 +53,14 @@ void FSMController::signal_new_slac_message(slac::messages::HomeplugMessage& msg
         if (ctx.slac_config.qualcomm_op_attr_polling &&
             ctx.modem_vendor == slac::fsm::evse::ModemVendor::Qualcomm &&
             mmtype == (slac::defs::qualcomm::MMTYPE_OP_ATTR | slac::defs::MMTYPE_MODE_CNF)) {
-            const auto device_info = slac::fsm::evse::get_qualcomm_device_info_debug(msg);
+            const auto device_info =
+                slac::fsm::evse::get_qualcomm_device_info_debug(msg, ctx.slac_config.qualcomm_debug_dump_max_bytes);
             ctx.log_info(device_info);
         } else if (ctx.slac_config.qualcomm_nw_info_polling &&
                    ctx.modem_vendor == slac::fsm::evse::ModemVendor::Qualcomm &&
                    mmtype == (slac::defs::qualcomm::MMTYPE_NW_INFO | slac::defs::MMTYPE_MODE_CNF)) {
-            const auto nw_info = slac::fsm::evse::get_qualcomm_nw_info_debug(msg);
+            const auto nw_info =
+                slac::fsm::evse::get_qualcomm_nw_info_debug(msg, ctx.slac_config.qualcomm_debug_dump_max_bytes);
             ctx.log_info(nw_info);
         }
         ctx.slac_message_payload = msg;

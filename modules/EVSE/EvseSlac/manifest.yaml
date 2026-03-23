@@ -80,6 +80,13 @@ provides:
         description: Periodically request Qualcomm NW_INFO and log the raw reply.
         type: boolean
         default: false
+      qualcomm_debug_dump_max_bytes:
+        description: >-
+          Maximum number of bytes to include from each Qualcomm raw payload/frame dump.
+          Set to 0 to log the full dump.
+        type: integer
+        default: 0
+        minimum: 0
       debug_simulate_failed_matching:
         description: Only for debugging. Simulate failed matching by sending a wrong NMK to the EV.
         type: boolean
