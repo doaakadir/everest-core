@@ -105,20 +105,21 @@ void FSMController::run() {
 
     while (true) {
         auto feed_result = fsm.feed();
+        const auto qualcomm_polling_enabled =
+            ctx.slac_config.qualcomm_op_attr_polling || ctx.slac_config.qualcomm_nw_info_polling;
+
+        std::optional<std::chrono::milliseconds> wait_timeout;
 
         if (feed_result.transition()) {
             // call immediately again
             continue;
         } else if (feed_result.internal_error() || feed_result.unhandled_event()) {
             // FIXME (aw): would need to log here!
-        }
-
-        std::optional<std::chrono::milliseconds> wait_timeout;
-        if (feed_result.has_value() == true) {
+        } else if (feed_result.has_value() == true) {
             wait_timeout = std::chrono::milliseconds(*feed_result);
         }
 
-        if (ctx.slac_config.qualcomm_op_attr_polling || ctx.slac_config.qualcomm_nw_info_polling) {
+        if (qualcomm_polling_enabled) {
             const auto now = std::chrono::steady_clock::now();
             const auto poll_timeout =
                 next_qualcomm_op_attr_poll > now
@@ -133,8 +134,7 @@ void FSMController::run() {
         if (wait_timeout.has_value()) {
             const auto timeout = wait_timeout->count();
             if (timeout == 0) {
-                if ((ctx.slac_config.qualcomm_op_attr_polling || ctx.slac_config.qualcomm_nw_info_polling) &&
-                    std::chrono::steady_clock::now() >= next_qualcomm_op_attr_poll) {
+                if (qualcomm_polling_enabled && std::chrono::steady_clock::now() >= next_qualcomm_op_attr_poll) {
                     if (should_poll_qualcomm_op_attr()) {
                         poll_qualcomm_op_attr();
                     }
@@ -154,8 +154,7 @@ void FSMController::run() {
         if (new_event) {
             // we got a new event, reset it and let run feed again
             new_event = false;
-        } else if ((ctx.slac_config.qualcomm_op_attr_polling || ctx.slac_config.qualcomm_nw_info_polling) &&
-                   std::chrono::steady_clock::now() >= next_qualcomm_op_attr_poll) {
+        } else if (qualcomm_polling_enabled && std::chrono::steady_clock::now() >= next_qualcomm_op_attr_poll) {
             if (should_poll_qualcomm_op_attr()) {
                 poll_qualcomm_op_attr();
             }
