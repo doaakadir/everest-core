@@ -5,9 +5,11 @@
 
 #include <everest/slac/fsm/evse/fsm.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <thread>
 
 class FSMController {
 public:
@@ -26,15 +28,16 @@ private:
     std::chrono::seconds get_qualcomm_op_attr_poll_interval() const;
     void poll_qualcomm_op_attr();
     void poll_qualcomm_nw_info();
+    void qualcomm_poll_loop();
     slac::fsm::evse::Context& ctx;
     slac::fsm::evse::FSM fsm;
 
-    bool running{false};
+    std::atomic_bool running{false};
 
     std::mutex feed_mtx;
     std::condition_variable new_event_cv;
     bool new_event{false};
-    std::chrono::steady_clock::time_point next_qualcomm_op_attr_poll{};
+    std::thread qualcomm_poll_thread;
 };
 
 #endif // EVSE_SLAC_FSM_CONTROLLER_HPP

@@ -5,8 +5,6 @@
 #include <everest/slac/fsm/evse/device_info.hpp>
 #include <everest/slac/fsm/evse/states/others.hpp>
 
-#include <optional>
-
 FSMController::FSMController(slac::fsm::evse::Context& context) : ctx(context){};
 
 bool FSMController::should_poll_qualcomm_op_attr() const {
@@ -43,6 +41,28 @@ void FSMController::poll_qualcomm_nw_info() {
     ctx.send_slac_message(ctx.slac_config.plc_peer_mac, nw_info_req);
 }
 
+void FSMController::qualcomm_poll_loop() {
+    while (running) {
+        std::this_thread::sleep_for(get_qualcomm_op_attr_poll_interval());
+
+        if (!running) {
+            break;
+        }
+
+        std::unique_lock<std::mutex> feed_lck(feed_mtx, std::try_to_lock);
+        if (!feed_lck.owns_lock()) {
+            continue;
+        }
+
+        if (should_poll_qualcomm_op_attr()) {
+            poll_qualcomm_op_attr();
+        }
+        if (should_poll_qualcomm_nw_info()) {
+            poll_qualcomm_nw_info();
+        }
+    }
+}
+
 void FSMController::signal_new_slac_message(slac::messages::HomeplugMessage& msg) {
     if (running == false) {
         return;
@@ -65,9 +85,8 @@ void FSMController::signal_new_slac_message(slac::messages::HomeplugMessage& msg
         }
         ctx.slac_message_payload = msg;
         fsm.handle_event(slac::fsm::evse::Event::SLAC_MESSAGE);
+        new_event = true;
     }
-
-    new_event = true;
     new_event_cv.notify_all();
 }
 
@@ -84,6 +103,19 @@ bool FSMController::signal_leave_bcd() {
 }
 
 bool FSMController::signal_simple_event(slac::fsm::evse::Event ev) {
+    fsm::HandleEventResult event_result;
+    {
+        const std::lock_guard<std::mutex> feed_lck(feed_mtx);
+        event_result = fsm.handle_event(ev);
+        new_event = true;
+    }
+    new_event_cv.notify_all();
+
+    return event_result == fsm::HandleEventResult::SUCCESS;
+}
+
+/*
+bool FSMController::signal_simple_event(slac::fsm::evse::Event ev) {
     const std::lock_guard<std::mutex> feed_lck(feed_mtx);
     auto event_result = fsm.handle_event(ev);
 
@@ -92,6 +124,8 @@ bool FSMController::signal_simple_event(slac::fsm::evse::Event ev) {
 
     return event_result == fsm::HandleEventResult::SUCCESS;
 }
+*/
+
 
 void FSMController::run() {
     ctx.log_info("Starting the SLAC state machine");
@@ -101,14 +135,14 @@ void FSMController::run() {
     std::unique_lock<std::mutex> feed_lck(feed_mtx);
 
     running = true;
-    next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + get_qualcomm_op_attr_poll_interval();
+
+    if (ctx.slac_config.qualcomm_op_attr_polling || ctx.slac_config.qualcomm_nw_info_polling) {
+        qualcomm_poll_thread = std::thread(&FSMController::qualcomm_poll_loop, this);
+        qualcomm_poll_thread.detach();
+    }
 
     while (true) {
         auto feed_result = fsm.feed();
-        const auto qualcomm_polling_enabled =
-            ctx.slac_config.qualcomm_op_attr_polling || ctx.slac_config.qualcomm_nw_info_polling;
-
-        std::optional<std::chrono::milliseconds> wait_timeout;
 
         if (feed_result.transition()) {
             // call immediately again
@@ -116,33 +150,9 @@ void FSMController::run() {
         } else if (feed_result.internal_error() || feed_result.unhandled_event()) {
             // FIXME (aw): would need to log here!
         } else if (feed_result.has_value() == true) {
-            wait_timeout = std::chrono::milliseconds(*feed_result);
-        }
-
-        if (qualcomm_polling_enabled) {
-            const auto now = std::chrono::steady_clock::now();
-            const auto poll_timeout =
-                next_qualcomm_op_attr_poll > now
-                    ? std::chrono::duration_cast<std::chrono::milliseconds>(next_qualcomm_op_attr_poll - now)
-                    : std::chrono::milliseconds(0);
-
-            if (!wait_timeout.has_value() || poll_timeout < *wait_timeout) {
-                wait_timeout = poll_timeout;
-            }
-        }
-
-        if (wait_timeout.has_value()) {
-            const auto timeout = wait_timeout->count();
+            const auto timeout = *feed_result;
             if (timeout == 0) {
-                if (qualcomm_polling_enabled && std::chrono::steady_clock::now() >= next_qualcomm_op_attr_poll) {
-                    if (should_poll_qualcomm_op_attr()) {
-                        poll_qualcomm_op_attr();
-                    }
-                    if (should_poll_qualcomm_nw_info()) {
-                        poll_qualcomm_nw_info();
-                    }
-                    next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + get_qualcomm_op_attr_poll_interval();
-                }
+                // call feed directly again
                 continue;
             }
             new_event_cv.wait_for(feed_lck, std::chrono::milliseconds(timeout), [this] { return new_event; });
@@ -154,14 +164,6 @@ void FSMController::run() {
         if (new_event) {
             // we got a new event, reset it and let run feed again
             new_event = false;
-        } else if (qualcomm_polling_enabled && std::chrono::steady_clock::now() >= next_qualcomm_op_attr_poll) {
-            if (should_poll_qualcomm_op_attr()) {
-                poll_qualcomm_op_attr();
-            }
-            if (should_poll_qualcomm_nw_info()) {
-                poll_qualcomm_nw_info();
-            }
-            next_qualcomm_op_attr_poll = std::chrono::steady_clock::now() + get_qualcomm_op_attr_poll_interval();
         }
     }
 }
