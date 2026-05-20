@@ -20,3 +20,4 @@ active_modules:
         - module_id: example
           implementation_id: example
     module: ExampleUser
+ 
