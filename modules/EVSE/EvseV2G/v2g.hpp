@@ -240,6 +240,7 @@ struct v2g_context {
     bool is_dc_charger;         /* Is set to true if it is a DC charger. Value is configured after configuration of the
                                    supported energy type */
     bool debugMode;             /* To activate/deactivate the debug mode */
+    bool log_v2g_message_json;  /* Add decoded V2G message JSON to debug V2G message publications */
     int8_t supported_protocols; /* Is an bit mask and holds the supported app protocols. See v2g_protocol enum */
     enum v2g_protocol selected_protocol; /* Holds the selected protocole after supported app protocol */
     std::atomic<bool>

@@ -312,6 +312,7 @@ struct v2g_context* v2g_ctx_create(ISO15118_chargerImplBase* p_chargerImplBase,
     ctx->tls_socket.fd = -1;
     ctx->tls_key_logging = false;
     ctx->debugMode = false;
+    ctx->log_v2g_message_json = false;
 
     /* according to man page, both functions never return an error */
     evthread_use_pthreads();

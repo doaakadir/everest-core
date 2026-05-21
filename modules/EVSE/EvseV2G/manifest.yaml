@@ -75,6 +75,13 @@ config:
       Enable the built-in SDP server
     type: boolean
     default: true
+  log_v2g_message_json:
+    description: >-
+      Add decoded V2G message content as JSON to the published V2G message logs.
+      Session logging must still be enabled by the EVSE manager for these logs
+      to be emitted.
+    type: boolean
+    default: false
 provides:
   charger:
     interface: ISO15118_charger

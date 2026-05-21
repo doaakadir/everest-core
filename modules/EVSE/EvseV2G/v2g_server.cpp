@@ -3,9 +3,12 @@
 // Copyright (C) 2023 Contributors to EVerest
 #include "v2g_server.hpp"
 
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <inttypes.h>
+#include <nlohmann/json.hpp>
 #include <string.h>
 #include <unistd.h>
 
@@ -95,6 +98,689 @@ static types::iso15118::V2gMessageId get_v2g_message_id(enum V2gMsgTypeId v2g_ms
     }
 }
 
+namespace {
+
+using json = nlohmann::json;
+
+static const char* protocol_to_string(const enum v2g_protocol protocol) {
+    switch (protocol) {
+    case V2G_PROTO_DIN70121:
+        return "DIN70121";
+    case V2G_PROTO_ISO15118_2010:
+        return "ISO15118-2-2010";
+    case V2G_PROTO_ISO15118_2013:
+        return "ISO15118-2-2013";
+    case V2G_UNKNOWN_PROTOCOL:
+    default:
+        return "Unknown";
+    }
+}
+
+static std::string bytes_to_hex(const uint8_t* bytes, const size_t len) {
+    std::string hex_string;
+    hex_string.reserve(len * 2);
+    for (size_t i = 0; i < len; i++) {
+        char hex[3];
+        snprintf(hex, sizeof(hex), "%02x", bytes[i]);
+        hex_string += hex;
+    }
+    return hex_string;
+}
+
+template <typename T> static std::string bytes_field_to_hex(const T& value) {
+    return bytes_to_hex(value.bytes, value.bytesLen);
+}
+
+template <typename T> static std::string characters_to_string(const T& value) {
+    return std::string(reinterpret_cast<const char*>(value.characters), value.charactersLen);
+}
+
+template <typename T> static double physical_value_to_double(const T& value) {
+    return calc_physical_value(value.Value, value.Multiplier);
+}
+
+template <typename T> static json physical_value_to_json(const T& value, const char* unit) {
+    return {{"value", physical_value_to_double(value)}, {"unit", unit}};
+}
+
+template <typename T> static void add_physical_value(json& target, const char* key, const T& value, const char* unit) {
+    target[key] = physical_value_to_json(value, unit);
+}
+
+static const char* v2g_message_type_to_string(const enum V2gMsgTypeId message_type) {
+    const auto idx = static_cast<size_t>(message_type);
+    return idx < ARRAY_SIZE(v2g_msg_type) ? v2g_msg_type[idx] : "Unknown";
+}
+
+template <typename ResponseCodeT, size_t N>
+static json response_code_to_json(const ResponseCodeT code, const char* const (&names)[N]) {
+    const auto idx = static_cast<size_t>(code);
+    return {{"raw", static_cast<int>(code)}, {"name", idx < N ? names[idx] : "Unknown"}};
+}
+
+static json iso_dc_ev_status_to_json(const iso2_DC_EVStatusType& status) {
+    return {{"ev_ready", static_cast<bool>(status.EVReady)},
+            {"ev_error_code", static_cast<int>(status.EVErrorCode)},
+            {"soc_percent", static_cast<int>(status.EVRESSSOC)}};
+}
+
+static json din_dc_ev_status_to_json(const din_DC_EVStatusType& status) {
+    return {{"ev_ready", static_cast<bool>(status.EVReady)},
+            {"ev_error_code", static_cast<int>(status.EVErrorCode)},
+            {"soc_percent", static_cast<int>(status.EVRESSSOC)}};
+}
+
+static json iso_dc_evse_status_to_json(const iso2_DC_EVSEStatusType& status) {
+    json out = {{"evse_notification", static_cast<int>(status.EVSENotification)},
+                {"evse_status_code", static_cast<int>(status.EVSEStatusCode)},
+                {"notification_max_delay_s", status.NotificationMaxDelay}};
+    if (status.EVSEIsolationStatus_isUsed == 1) {
+        out["evse_isolation_status"] = static_cast<int>(status.EVSEIsolationStatus);
+    }
+    return out;
+}
+
+static json din_dc_evse_status_to_json(const din_DC_EVSEStatusType& status) {
+    json out = {{"evse_notification", static_cast<int>(status.EVSENotification)},
+                {"evse_status_code", static_cast<int>(status.EVSEStatusCode)},
+                {"notification_max_delay_s", status.NotificationMaxDelay}};
+    if (status.EVSEIsolationStatus_isUsed == 1) {
+        out["evse_isolation_status"] = static_cast<int>(status.EVSEIsolationStatus);
+    }
+    return out;
+}
+
+static json build_app_handshake_json(const v2g_connection* conn, const bool is_req) {
+    json payload;
+    if (is_req) {
+        json protocols = json::array();
+        const auto& req = conn->handshake_req.supportedAppProtocolReq;
+        for (uint16_t i = 0; i < req.AppProtocol.arrayLen; i++) {
+            const auto& app_proto = req.AppProtocol.array[i];
+            protocols.push_back({{"namespace", characters_to_string(app_proto.ProtocolNamespace)},
+                                 {"version_major", app_proto.VersionNumberMajor},
+                                 {"version_minor", app_proto.VersionNumberMinor},
+                                 {"schema_id", app_proto.SchemaID},
+                                 {"priority", app_proto.Priority}});
+        }
+        payload["app_protocols"] = protocols;
+    } else {
+        const auto& res = conn->handshake_resp.supportedAppProtocolRes;
+        payload["response_code"] = static_cast<int>(res.ResponseCode);
+        if (res.SchemaID_isUsed == 1) {
+            payload["schema_id"] = res.SchemaID;
+        }
+    }
+    return payload;
+}
+
+static json build_iso_request_payload(const v2g_connection* conn) {
+    const auto& body = conn->exi_in.iso2EXIDocument->V2G_Message.Body;
+    switch (conn->ctx->current_v2g_msg) {
+    case V2G_SESSION_SETUP_MSG:
+        return {{"evcc_id", bytes_field_to_hex(body.SessionSetupReq.EVCCID)}};
+
+    case V2G_SERVICE_DISCOVERY_MSG: {
+        json payload;
+        if (body.ServiceDiscoveryReq.ServiceScope_isUsed == 1) {
+            payload["service_scope"] = characters_to_string(body.ServiceDiscoveryReq.ServiceScope);
+        }
+        if (body.ServiceDiscoveryReq.ServiceCategory_isUsed == 1) {
+            payload["service_category"] = static_cast<int>(body.ServiceDiscoveryReq.ServiceCategory);
+        }
+        return payload;
+    }
+
+    case V2G_SERVICE_DETAIL_MSG:
+        return {{"service_id", body.ServiceDetailReq.ServiceID}};
+
+    case V2G_PAYMENT_SERVICE_SELECTION_MSG:
+        return {{"selected_payment_option", static_cast<int>(body.PaymentServiceSelectionReq.SelectedPaymentOption)},
+                {"selected_service_count",
+                 body.PaymentServiceSelectionReq.SelectedServiceList.SelectedService.arrayLen}};
+
+    case V2G_PAYMENT_DETAILS_MSG: {
+        const auto& req = body.PaymentDetailsReq;
+        json payload = {{"emaid", characters_to_string(req.eMAID)},
+                        {"contract_certificate_bytes", req.ContractSignatureCertChain.Certificate.bytesLen},
+                        {"sub_certificates_used",
+                         static_cast<bool>(req.ContractSignatureCertChain.SubCertificates_isUsed)}};
+        if (req.ContractSignatureCertChain.SubCertificates_isUsed == 1) {
+            payload["sub_certificate_count"] = req.ContractSignatureCertChain.SubCertificates.Certificate.arrayLen;
+        }
+        return payload;
+    }
+
+    case V2G_AUTHORIZATION_MSG:
+        return {{"gen_challenge_used", static_cast<bool>(body.AuthorizationReq.GenChallenge_isUsed)},
+                {"id_used", static_cast<bool>(body.AuthorizationReq.Id_isUsed)}};
+
+    case V2G_CHARGE_PARAMETER_DISCOVERY_MSG: {
+        const auto& req = body.ChargeParameterDiscoveryReq;
+        json payload = {{"requested_energy_transfer_mode", static_cast<int>(req.RequestedEnergyTransferMode)}};
+        if (req.MaxEntriesSAScheduleTuple_isUsed == 1) {
+            payload["max_entries_sa_schedule_tuple"] = req.MaxEntriesSAScheduleTuple;
+        }
+        if (req.AC_EVChargeParameter_isUsed == 1) {
+            json ac;
+            const auto& ac_param = req.AC_EVChargeParameter;
+            if (ac_param.DepartureTime_isUsed == 1) {
+                ac["departure_time_s"] = ac_param.DepartureTime;
+            }
+            add_physical_value(ac, "energy_amount", ac_param.EAmount, "Wh");
+            add_physical_value(ac, "ev_max_voltage", ac_param.EVMaxVoltage, "V");
+            add_physical_value(ac, "ev_max_current", ac_param.EVMaxCurrent, "A");
+            add_physical_value(ac, "ev_min_current", ac_param.EVMinCurrent, "A");
+            payload["ac_ev_charge_parameter"] = ac;
+        }
+        if (req.DC_EVChargeParameter_isUsed == 1) {
+            json dc;
+            const auto& dc_param = req.DC_EVChargeParameter;
+            if (dc_param.DepartureTime_isUsed == 1) {
+                dc["departure_time_s"] = dc_param.DepartureTime;
+            }
+            if (dc_param.EVEnergyCapacity_isUsed == 1) {
+                add_physical_value(dc, "ev_energy_capacity", dc_param.EVEnergyCapacity, "Wh");
+            }
+            if (dc_param.EVEnergyRequest_isUsed == 1) {
+                add_physical_value(dc, "ev_energy_request", dc_param.EVEnergyRequest, "Wh");
+            }
+            if (dc_param.FullSOC_isUsed == 1) {
+                dc["full_soc_percent"] = dc_param.FullSOC;
+            }
+            if (dc_param.BulkSOC_isUsed == 1) {
+                dc["bulk_soc_percent"] = dc_param.BulkSOC;
+            }
+            add_physical_value(dc, "ev_max_current", dc_param.EVMaximumCurrentLimit, "A");
+            if (dc_param.EVMaximumPowerLimit_isUsed == 1) {
+                add_physical_value(dc, "ev_max_power", dc_param.EVMaximumPowerLimit, "W");
+            }
+            add_physical_value(dc, "ev_max_voltage", dc_param.EVMaximumVoltageLimit, "V");
+            dc["dc_ev_status"] = iso_dc_ev_status_to_json(dc_param.DC_EVStatus);
+            payload["dc_ev_charge_parameter"] = dc;
+        }
+        return payload;
+    }
+
+    case V2G_CABLE_CHECK_MSG:
+        return {{"dc_ev_status", iso_dc_ev_status_to_json(body.CableCheckReq.DC_EVStatus)}};
+
+    case V2G_PRE_CHARGE_MSG: {
+        const auto& req = body.PreChargeReq;
+        json payload = {{"dc_ev_status", iso_dc_ev_status_to_json(req.DC_EVStatus)}};
+        add_physical_value(payload, "ev_target_voltage", req.EVTargetVoltage, "V");
+        add_physical_value(payload, "ev_target_current", req.EVTargetCurrent, "A");
+        return payload;
+    }
+
+    case V2G_POWER_DELIVERY_MSG: {
+        const auto& req = body.PowerDeliveryReq;
+        json payload = {{"charge_progress", static_cast<int>(req.ChargeProgress)},
+                        {"sa_schedule_tuple_id", req.SAScheduleTupleID},
+                        {"charging_profile_used", static_cast<bool>(req.ChargingProfile_isUsed)}};
+        if (req.DC_EVPowerDeliveryParameter_isUsed == 1) {
+            const auto& dc = req.DC_EVPowerDeliveryParameter;
+            payload["dc_ev_power_delivery_parameter"] = {
+                {"charging_complete", static_cast<bool>(dc.ChargingComplete)},
+                {"bulk_charging_complete_used", static_cast<bool>(dc.BulkChargingComplete_isUsed)},
+                {"dc_ev_status", iso_dc_ev_status_to_json(dc.DC_EVStatus)}};
+            if (dc.BulkChargingComplete_isUsed == 1) {
+                payload["dc_ev_power_delivery_parameter"]["bulk_charging_complete"] =
+                    static_cast<bool>(dc.BulkChargingComplete);
+            }
+        }
+        return payload;
+    }
+
+    case V2G_CURRENT_DEMAND_MSG: {
+        const auto& req = body.CurrentDemandReq;
+        json payload = {{"dc_ev_status", iso_dc_ev_status_to_json(req.DC_EVStatus)},
+                        {"charging_complete", static_cast<bool>(req.ChargingComplete)},
+                        {"bulk_charging_complete_used", static_cast<bool>(req.BulkChargingComplete_isUsed)}};
+        if (req.BulkChargingComplete_isUsed == 1) {
+            payload["bulk_charging_complete"] = static_cast<bool>(req.BulkChargingComplete);
+        }
+        add_physical_value(payload, "ev_target_voltage", req.EVTargetVoltage, "V");
+        add_physical_value(payload, "ev_target_current", req.EVTargetCurrent, "A");
+        if (req.EVMaximumCurrentLimit_isUsed == 1) {
+            add_physical_value(payload, "ev_max_current", req.EVMaximumCurrentLimit, "A");
+        }
+        if (req.EVMaximumPowerLimit_isUsed == 1) {
+            add_physical_value(payload, "ev_max_power", req.EVMaximumPowerLimit, "W");
+        }
+        if (req.EVMaximumVoltageLimit_isUsed == 1) {
+            add_physical_value(payload, "ev_max_voltage", req.EVMaximumVoltageLimit, "V");
+        }
+        if (req.RemainingTimeToFullSoC_isUsed == 1) {
+            add_physical_value(payload, "remaining_time_to_full_soc", req.RemainingTimeToFullSoC, "s");
+        }
+        if (req.RemainingTimeToBulkSoC_isUsed == 1) {
+            add_physical_value(payload, "remaining_time_to_bulk_soc", req.RemainingTimeToBulkSoC, "s");
+        }
+        return payload;
+    }
+
+    case V2G_METERING_RECEIPT_MSG: {
+        const auto& req = body.MeteringReceiptReq;
+        json payload = {{"id", characters_to_string(req.Id)},
+                        {"sa_schedule_tuple_id", req.SAScheduleTupleID},
+                        {"session_id", bytes_field_to_hex(req.SessionID)},
+                        {"meter_status", req.MeterInfo.MeterStatus},
+                        {"meter_id", characters_to_string(req.MeterInfo.MeterID)},
+                        {"meter_reading_used", static_cast<bool>(req.MeterInfo.MeterReading_isUsed)},
+                        {"t_meter", req.MeterInfo.TMeter}};
+        if (req.MeterInfo.MeterReading_isUsed == 1) {
+            payload["meter_reading"] = req.MeterInfo.MeterReading;
+        }
+        return payload;
+    }
+
+    case V2G_WELDING_DETECTION_MSG:
+        return {{"dc_ev_status", iso_dc_ev_status_to_json(body.WeldingDetectionReq.DC_EVStatus)}};
+
+    case V2G_SESSION_STOP_MSG:
+        return {{"charging_session", static_cast<int>(body.SessionStopReq.ChargingSession)}};
+
+    default:
+        return json::object();
+    }
+}
+
+static json build_iso_response_payload(const v2g_connection* conn) {
+    const auto& body = conn->exi_out.iso2EXIDocument->V2G_Message.Body;
+    switch (conn->ctx->current_v2g_msg) {
+    case V2G_SESSION_SETUP_MSG: {
+        const auto& res = body.SessionSetupRes;
+        json payload = {{"response_code", response_code_to_json(res.ResponseCode, isoResponse)},
+                        {"evse_id", characters_to_string(res.EVSEID)}};
+        if (res.EVSETimeStamp_isUsed == 1) {
+            payload["evse_timestamp"] = res.EVSETimeStamp;
+        }
+        return payload;
+    }
+
+    case V2G_SERVICE_DISCOVERY_MSG: {
+        const auto& res = body.ServiceDiscoveryRes;
+        return {{"response_code", response_code_to_json(res.ResponseCode, isoResponse)},
+                {"payment_option_count", res.PaymentOptionList.PaymentOption.arrayLen},
+                {"charge_service_id", res.ChargeService.ServiceID},
+                {"charge_service_free", static_cast<bool>(res.ChargeService.FreeService)}};
+    }
+
+    case V2G_SERVICE_DETAIL_MSG:
+        return {{"response_code", response_code_to_json(body.ServiceDetailRes.ResponseCode, isoResponse)},
+                {"service_id", body.ServiceDetailRes.ServiceID}};
+
+    case V2G_PAYMENT_SERVICE_SELECTION_MSG:
+        return {{"response_code", response_code_to_json(body.PaymentServiceSelectionRes.ResponseCode, isoResponse)}};
+
+    case V2G_PAYMENT_DETAILS_MSG:
+        return {{"response_code", response_code_to_json(body.PaymentDetailsRes.ResponseCode, isoResponse)},
+                {"evse_time_stamp", body.PaymentDetailsRes.EVSETimeStamp}};
+
+    case V2G_AUTHORIZATION_MSG:
+        return {{"response_code", response_code_to_json(body.AuthorizationRes.ResponseCode, isoResponse)},
+                {"evse_processing", static_cast<int>(body.AuthorizationRes.EVSEProcessing)}};
+
+    case V2G_CHARGE_PARAMETER_DISCOVERY_MSG: {
+        const auto& res = body.ChargeParameterDiscoveryRes;
+        json payload = {{"response_code", response_code_to_json(res.ResponseCode, isoResponse)},
+                        {"evse_processing", static_cast<int>(res.EVSEProcessing)},
+                        {"sa_schedule_list_used", static_cast<bool>(res.SAScheduleList_isUsed)}};
+        if (res.DC_EVSEChargeParameter_isUsed == 1) {
+            const auto& dc = res.DC_EVSEChargeParameter;
+            json dc_json = {{"dc_evse_status", iso_dc_evse_status_to_json(dc.DC_EVSEStatus)}};
+            add_physical_value(dc_json, "evse_max_current", dc.EVSEMaximumCurrentLimit, "A");
+            add_physical_value(dc_json, "evse_max_power", dc.EVSEMaximumPowerLimit, "W");
+            add_physical_value(dc_json, "evse_max_voltage", dc.EVSEMaximumVoltageLimit, "V");
+            add_physical_value(dc_json, "evse_min_current", dc.EVSEMinimumCurrentLimit, "A");
+            add_physical_value(dc_json, "evse_min_voltage", dc.EVSEMinimumVoltageLimit, "V");
+            payload["dc_evse_charge_parameter"] = dc_json;
+        }
+        if (res.AC_EVSEChargeParameter_isUsed == 1) {
+            const auto& ac = res.AC_EVSEChargeParameter;
+            json ac_json;
+            add_physical_value(ac_json, "evse_max_current", ac.EVSEMaxCurrent, "A");
+            add_physical_value(ac_json, "evse_nominal_voltage", ac.EVSENominalVoltage, "V");
+            payload["ac_evse_charge_parameter"] = ac_json;
+        }
+        return payload;
+    }
+
+    case V2G_CHARGING_STATUS_MSG: {
+        const auto& res = body.ChargingStatusRes;
+        json payload = {{"response_code", response_code_to_json(res.ResponseCode, isoResponse)},
+                        {"evse_id", characters_to_string(res.EVSEID)},
+                        {"receipt_required", static_cast<bool>(res.ReceiptRequired)},
+                        {"sa_schedule_tuple_id", res.SAScheduleTupleID}};
+        if (res.EVSEMaxCurrent_isUsed == 1) {
+            add_physical_value(payload, "evse_max_current", res.EVSEMaxCurrent, "A");
+        }
+        return payload;
+    }
+
+    case V2G_METERING_RECEIPT_MSG:
+        return {{"response_code", response_code_to_json(body.MeteringReceiptRes.ResponseCode, isoResponse)}};
+
+    case V2G_CABLE_CHECK_MSG:
+        return {{"response_code", response_code_to_json(body.CableCheckRes.ResponseCode, isoResponse)},
+                {"evse_processing", static_cast<int>(body.CableCheckRes.EVSEProcessing)},
+                {"dc_evse_status", iso_dc_evse_status_to_json(body.CableCheckRes.DC_EVSEStatus)}};
+
+    case V2G_PRE_CHARGE_MSG: {
+        const auto& res = body.PreChargeRes;
+        json payload = {{"response_code", response_code_to_json(res.ResponseCode, isoResponse)},
+                        {"dc_evse_status", iso_dc_evse_status_to_json(res.DC_EVSEStatus)}};
+        add_physical_value(payload, "evse_present_voltage", res.EVSEPresentVoltage, "V");
+        return payload;
+    }
+
+    case V2G_POWER_DELIVERY_MSG: {
+        const auto& res = body.PowerDeliveryRes;
+        json payload = {{"response_code", response_code_to_json(res.ResponseCode, isoResponse)}};
+        if (res.DC_EVSEStatus_isUsed == 1) {
+            payload["dc_evse_status"] = iso_dc_evse_status_to_json(res.DC_EVSEStatus);
+        }
+        return payload;
+    }
+
+    case V2G_CURRENT_DEMAND_MSG: {
+        const auto& res = body.CurrentDemandRes;
+        json payload = {{"response_code", response_code_to_json(res.ResponseCode, isoResponse)},
+                        {"dc_evse_status", iso_dc_evse_status_to_json(res.DC_EVSEStatus)},
+                        {"current_limit_achieved", static_cast<bool>(res.EVSECurrentLimitAchieved)},
+                        {"voltage_limit_achieved", static_cast<bool>(res.EVSEVoltageLimitAchieved)},
+                        {"power_limit_achieved", static_cast<bool>(res.EVSEPowerLimitAchieved)},
+                        {"receipt_required_used", static_cast<bool>(res.ReceiptRequired_isUsed)},
+                        {"sa_schedule_tuple_id", res.SAScheduleTupleID}};
+        add_physical_value(payload, "evse_present_voltage", res.EVSEPresentVoltage, "V");
+        add_physical_value(payload, "evse_present_current", res.EVSEPresentCurrent, "A");
+        if (res.EVSEMaximumCurrentLimit_isUsed == 1) {
+            add_physical_value(payload, "evse_max_current", res.EVSEMaximumCurrentLimit, "A");
+        }
+        if (res.EVSEMaximumPowerLimit_isUsed == 1) {
+            add_physical_value(payload, "evse_max_power", res.EVSEMaximumPowerLimit, "W");
+        }
+        if (res.EVSEMaximumVoltageLimit_isUsed == 1) {
+            add_physical_value(payload, "evse_max_voltage", res.EVSEMaximumVoltageLimit, "V");
+        }
+        if (res.ReceiptRequired_isUsed == 1) {
+            payload["receipt_required"] = static_cast<bool>(res.ReceiptRequired);
+        }
+        return payload;
+    }
+
+    case V2G_WELDING_DETECTION_MSG: {
+        const auto& res = body.WeldingDetectionRes;
+        json payload = {{"response_code", response_code_to_json(res.ResponseCode, isoResponse)},
+                        {"dc_evse_status", iso_dc_evse_status_to_json(res.DC_EVSEStatus)}};
+        add_physical_value(payload, "evse_present_voltage", res.EVSEPresentVoltage, "V");
+        return payload;
+    }
+
+    case V2G_SESSION_STOP_MSG:
+        return {{"response_code", response_code_to_json(body.SessionStopRes.ResponseCode, isoResponse)}};
+
+    default:
+        return json::object();
+    }
+}
+
+static json build_din_request_payload(const v2g_connection* conn) {
+    const auto& body = conn->exi_in.dinEXIDocument->V2G_Message.Body;
+    switch (conn->ctx->current_v2g_msg) {
+    case V2G_SESSION_SETUP_MSG:
+        return {{"evcc_id", bytes_field_to_hex(body.SessionSetupReq.EVCCID)}};
+
+    case V2G_SERVICE_DISCOVERY_MSG:
+        return json::object();
+
+    case V2G_PAYMENT_SERVICE_SELECTION_MSG:
+        return {{"selected_payment_option", static_cast<int>(body.ServicePaymentSelectionReq.SelectedPaymentOption)},
+                {"selected_service_count",
+                 body.ServicePaymentSelectionReq.SelectedServiceList.SelectedService.arrayLen}};
+
+    case V2G_AUTHORIZATION_MSG:
+        return json::object();
+
+    case V2G_CHARGE_PARAMETER_DISCOVERY_MSG: {
+        const auto& req = body.ChargeParameterDiscoveryReq;
+        json payload = {{"requested_energy_transfer_type", static_cast<int>(req.EVRequestedEnergyTransferType)}};
+        if (req.DC_EVChargeParameter_isUsed == 1) {
+            const auto& dc = req.DC_EVChargeParameter;
+            json dc_json = {{"dc_ev_status", din_dc_ev_status_to_json(dc.DC_EVStatus)}};
+            if (dc.EVEnergyCapacity_isUsed == 1) {
+                add_physical_value(dc_json, "ev_energy_capacity", dc.EVEnergyCapacity, "Wh");
+            }
+            if (dc.EVEnergyRequest_isUsed == 1) {
+                add_physical_value(dc_json, "ev_energy_request", dc.EVEnergyRequest, "Wh");
+            }
+            if (dc.FullSOC_isUsed == 1) {
+                dc_json["full_soc_percent"] = dc.FullSOC;
+            }
+            if (dc.BulkSOC_isUsed == 1) {
+                dc_json["bulk_soc_percent"] = dc.BulkSOC;
+            }
+            add_physical_value(dc_json, "ev_max_current", dc.EVMaximumCurrentLimit, "A");
+            if (dc.EVMaximumPowerLimit_isUsed == 1) {
+                add_physical_value(dc_json, "ev_max_power", dc.EVMaximumPowerLimit, "W");
+            }
+            add_physical_value(dc_json, "ev_max_voltage", dc.EVMaximumVoltageLimit, "V");
+            payload["dc_ev_charge_parameter"] = dc_json;
+        }
+        return payload;
+    }
+
+    case V2G_CABLE_CHECK_MSG:
+        return {{"dc_ev_status", din_dc_ev_status_to_json(body.CableCheckReq.DC_EVStatus)}};
+
+    case V2G_PRE_CHARGE_MSG: {
+        const auto& req = body.PreChargeReq;
+        json payload = {{"dc_ev_status", din_dc_ev_status_to_json(req.DC_EVStatus)}};
+        add_physical_value(payload, "ev_target_voltage", req.EVTargetVoltage, "V");
+        add_physical_value(payload, "ev_target_current", req.EVTargetCurrent, "A");
+        return payload;
+    }
+
+    case V2G_POWER_DELIVERY_MSG: {
+        const auto& req = body.PowerDeliveryReq;
+        json payload = {{"ready_to_charge_state", static_cast<bool>(req.ReadyToChargeState)},
+                        {"charging_profile_used", static_cast<bool>(req.ChargingProfile_isUsed)}};
+        if (req.DC_EVPowerDeliveryParameter_isUsed == 1) {
+            const auto& dc = req.DC_EVPowerDeliveryParameter;
+            payload["dc_ev_power_delivery_parameter"] = {
+                {"charging_complete", static_cast<bool>(dc.ChargingComplete)},
+                {"bulk_charging_complete_used", static_cast<bool>(dc.BulkChargingComplete_isUsed)},
+                {"dc_ev_status", din_dc_ev_status_to_json(dc.DC_EVStatus)}};
+            if (dc.BulkChargingComplete_isUsed == 1) {
+                payload["dc_ev_power_delivery_parameter"]["bulk_charging_complete"] =
+                    static_cast<bool>(dc.BulkChargingComplete);
+            }
+        }
+        return payload;
+    }
+
+    case V2G_CURRENT_DEMAND_MSG: {
+        const auto& req = body.CurrentDemandReq;
+        json payload = {{"dc_ev_status", din_dc_ev_status_to_json(req.DC_EVStatus)},
+                        {"charging_complete", static_cast<bool>(req.ChargingComplete)},
+                        {"bulk_charging_complete_used", static_cast<bool>(req.BulkChargingComplete_isUsed)}};
+        if (req.BulkChargingComplete_isUsed == 1) {
+            payload["bulk_charging_complete"] = static_cast<bool>(req.BulkChargingComplete);
+        }
+        add_physical_value(payload, "ev_target_voltage", req.EVTargetVoltage, "V");
+        add_physical_value(payload, "ev_target_current", req.EVTargetCurrent, "A");
+        if (req.EVMaximumCurrentLimit_isUsed == 1) {
+            add_physical_value(payload, "ev_max_current", req.EVMaximumCurrentLimit, "A");
+        }
+        if (req.EVMaximumPowerLimit_isUsed == 1) {
+            add_physical_value(payload, "ev_max_power", req.EVMaximumPowerLimit, "W");
+        }
+        if (req.EVMaximumVoltageLimit_isUsed == 1) {
+            add_physical_value(payload, "ev_max_voltage", req.EVMaximumVoltageLimit, "V");
+        }
+        if (req.RemainingTimeToFullSoC_isUsed == 1) {
+            add_physical_value(payload, "remaining_time_to_full_soc", req.RemainingTimeToFullSoC, "s");
+        }
+        if (req.RemainingTimeToBulkSoC_isUsed == 1) {
+            add_physical_value(payload, "remaining_time_to_bulk_soc", req.RemainingTimeToBulkSoC, "s");
+        }
+        return payload;
+    }
+
+    case V2G_WELDING_DETECTION_MSG:
+        return {{"dc_ev_status", din_dc_ev_status_to_json(body.WeldingDetectionReq.DC_EVStatus)}};
+
+    case V2G_SESSION_STOP_MSG:
+        return {{"session_stop", true}};
+
+    default:
+        return json::object();
+    }
+}
+
+static json build_din_response_payload(const v2g_connection* conn) {
+    const auto& body = conn->exi_out.dinEXIDocument->V2G_Message.Body;
+    switch (conn->ctx->current_v2g_msg) {
+    case V2G_SESSION_SETUP_MSG: {
+        const auto& res = body.SessionSetupRes;
+        json payload = {{"response_code", response_code_to_json(res.ResponseCode, dinResponse)},
+                        {"evse_id", bytes_field_to_hex(res.EVSEID)}};
+        if (res.DateTimeNow_isUsed == 1) {
+            payload["date_time_now"] = res.DateTimeNow;
+        }
+        return payload;
+    }
+
+    case V2G_SERVICE_DISCOVERY_MSG: {
+        const auto& res = body.ServiceDiscoveryRes;
+        return {{"response_code", response_code_to_json(res.ResponseCode, dinResponse)},
+                {"payment_option_count", res.PaymentOptions.PaymentOption.arrayLen},
+                {"charge_service_id", res.ChargeService.ServiceTag.ServiceID},
+                {"charge_service_free", static_cast<bool>(res.ChargeService.FreeService)},
+                {"energy_transfer_type", static_cast<int>(res.ChargeService.EnergyTransferType)}};
+    }
+
+    case V2G_PAYMENT_SERVICE_SELECTION_MSG:
+        return {{"response_code", response_code_to_json(body.ServicePaymentSelectionRes.ResponseCode, dinResponse)}};
+
+    case V2G_AUTHORIZATION_MSG:
+        return {{"response_code", response_code_to_json(body.ContractAuthenticationRes.ResponseCode, dinResponse)},
+                {"evse_processing", static_cast<int>(body.ContractAuthenticationRes.EVSEProcessing)}};
+
+    case V2G_CHARGE_PARAMETER_DISCOVERY_MSG: {
+        const auto& res = body.ChargeParameterDiscoveryRes;
+        json payload = {{"response_code", response_code_to_json(res.ResponseCode, dinResponse)},
+                        {"evse_processing", static_cast<int>(res.EVSEProcessing)},
+                        {"sa_schedule_list_used", static_cast<bool>(res.SAScheduleList_isUsed)}};
+        if (res.DC_EVSEChargeParameter_isUsed == 1) {
+            const auto& dc = res.DC_EVSEChargeParameter;
+            json dc_json = {{"dc_evse_status", din_dc_evse_status_to_json(dc.DC_EVSEStatus)}};
+            add_physical_value(dc_json, "evse_max_current", dc.EVSEMaximumCurrentLimit, "A");
+            if (dc.EVSEMaximumPowerLimit_isUsed == 1) {
+                add_physical_value(dc_json, "evse_max_power", dc.EVSEMaximumPowerLimit, "W");
+            }
+            add_physical_value(dc_json, "evse_max_voltage", dc.EVSEMaximumVoltageLimit, "V");
+            add_physical_value(dc_json, "evse_min_current", dc.EVSEMinimumCurrentLimit, "A");
+            add_physical_value(dc_json, "evse_min_voltage", dc.EVSEMinimumVoltageLimit, "V");
+            payload["dc_evse_charge_parameter"] = dc_json;
+        }
+        return payload;
+    }
+
+    case V2G_CABLE_CHECK_MSG:
+        return {{"response_code", response_code_to_json(body.CableCheckRes.ResponseCode, dinResponse)},
+                {"evse_processing", static_cast<int>(body.CableCheckRes.EVSEProcessing)},
+                {"dc_evse_status", din_dc_evse_status_to_json(body.CableCheckRes.DC_EVSEStatus)}};
+
+    case V2G_PRE_CHARGE_MSG: {
+        const auto& res = body.PreChargeRes;
+        json payload = {{"response_code", response_code_to_json(res.ResponseCode, dinResponse)},
+                        {"dc_evse_status", din_dc_evse_status_to_json(res.DC_EVSEStatus)}};
+        add_physical_value(payload, "evse_present_voltage", res.EVSEPresentVoltage, "V");
+        return payload;
+    }
+
+    case V2G_POWER_DELIVERY_MSG:
+        return {{"response_code", response_code_to_json(body.PowerDeliveryRes.ResponseCode, dinResponse)},
+                {"dc_evse_status", din_dc_evse_status_to_json(body.PowerDeliveryRes.DC_EVSEStatus)}};
+
+    case V2G_CURRENT_DEMAND_MSG: {
+        const auto& res = body.CurrentDemandRes;
+        json payload = {{"response_code", response_code_to_json(res.ResponseCode, dinResponse)},
+                        {"dc_evse_status", din_dc_evse_status_to_json(res.DC_EVSEStatus)},
+                        {"current_limit_achieved", static_cast<bool>(res.EVSECurrentLimitAchieved)},
+                        {"voltage_limit_achieved", static_cast<bool>(res.EVSEVoltageLimitAchieved)},
+                        {"power_limit_achieved", static_cast<bool>(res.EVSEPowerLimitAchieved)}};
+        add_physical_value(payload, "evse_present_voltage", res.EVSEPresentVoltage, "V");
+        add_physical_value(payload, "evse_present_current", res.EVSEPresentCurrent, "A");
+        if (res.EVSEMaximumCurrentLimit_isUsed == 1) {
+            add_physical_value(payload, "evse_max_current", res.EVSEMaximumCurrentLimit, "A");
+        }
+        if (res.EVSEMaximumPowerLimit_isUsed == 1) {
+            add_physical_value(payload, "evse_max_power", res.EVSEMaximumPowerLimit, "W");
+        }
+        if (res.EVSEMaximumVoltageLimit_isUsed == 1) {
+            add_physical_value(payload, "evse_max_voltage", res.EVSEMaximumVoltageLimit, "V");
+        }
+        return payload;
+    }
+
+    case V2G_WELDING_DETECTION_MSG: {
+        const auto& res = body.WeldingDetectionRes;
+        json payload = {{"response_code", response_code_to_json(res.ResponseCode, dinResponse)},
+                        {"dc_evse_status", din_dc_evse_status_to_json(res.DC_EVSEStatus)}};
+        add_physical_value(payload, "evse_present_voltage", res.EVSEPresentVoltage, "V");
+        return payload;
+    }
+
+    case V2G_SESSION_STOP_MSG:
+        return {{"response_code", response_code_to_json(body.SessionStopRes.ResponseCode, dinResponse)}};
+
+    default:
+        return json::object();
+    }
+}
+
+static json build_v2g_message_payload(const v2g_connection* conn, const bool is_req) {
+    if (conn->ctx->current_v2g_msg == V2G_SUPPORTED_APP_PROTOCOL_MSG) {
+        return build_app_handshake_json(conn, is_req);
+    }
+
+    switch (conn->ctx->selected_protocol) {
+    case V2G_PROTO_DIN70121:
+    case V2G_PROTO_ISO15118_2010:
+        return is_req ? build_din_request_payload(conn) : build_din_response_payload(conn);
+    case V2G_PROTO_ISO15118_2013:
+        return is_req ? build_iso_request_payload(conn) : build_iso_response_payload(conn);
+    case V2G_UNKNOWN_PROTOCOL:
+    default:
+        return json::object();
+    }
+}
+
+static std::string build_v2g_message_json(const v2g_connection* conn, const types::iso15118::V2gMessageId id,
+                                          const bool is_req) {
+    try {
+        json root = {{"message_id", static_cast<int>(id)},
+                     {"message", v2g_message_type_to_string(conn->ctx->current_v2g_msg)},
+                     {"direction", is_req ? "EV_to_EVSE" : "EVSE_to_EV"},
+                     {"protocol", protocol_to_string(conn->ctx->selected_protocol)}};
+
+        root["payload"] = build_v2g_message_payload(conn, is_req);
+        return root.dump();
+    } catch (const std::exception& e) {
+        json root = {{"message_id", static_cast<int>(id)},
+                     {"message", v2g_message_type_to_string(conn->ctx->current_v2g_msg)},
+                     {"direction", is_req ? "EV_to_EVSE" : "EVSE_to_EV"},
+                     {"protocol", protocol_to_string(conn->ctx->selected_protocol)},
+                     {"payload_decode_error", e.what()}};
+        return root.dump();
+    }
+}
+
+} // namespace
+
 /*!
  * \brief publish_var_V2G_Message This function fills a V2gMessages type with the V2G EXI message as HEX and Base64
  * \param conn hold the context of the V2G-connection.
@@ -124,6 +810,9 @@ static void publish_var_V2G_Message(v2g_connection* conn, bool is_req) {
     v2g_message.exi_base64 = EXI_Base64;
     v2g_message.id = get_v2g_message_id(conn->ctx->current_v2g_msg, conn->ctx->selected_protocol, is_req);
     v2g_message.exi = msg_as_hex_string;
+    if (conn->ctx->log_v2g_message_json == true) {
+        v2g_message.v2g_json = build_v2g_message_json(conn, v2g_message.id, is_req);
+    }
     conn->ctx->p_charger->publish_v2g_messages(v2g_message);
 }
 

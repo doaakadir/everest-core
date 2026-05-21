@@ -47,6 +47,7 @@ void ISO15118_chargerImpl::init() {
     }
 
     v2g_ctx->terminate_connection_on_failed_response = mod->config.terminate_connection_on_failed_response;
+    v2g_ctx->log_v2g_message_json = mod->config.log_v2g_message_json;
 
     v2g_ctx->tls_key_logging = mod->config.tls_key_logging;
     v2g_ctx->tls_key_logging_path = mod->config.tls_key_logging_path;

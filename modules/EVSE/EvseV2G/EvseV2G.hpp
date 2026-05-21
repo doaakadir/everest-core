@@ -39,6 +39,7 @@ struct Conf {
     int auth_timeout_pnc;
     int auth_timeout_eim;
     bool enable_sdp_server;
+    bool log_v2g_message_json;
 };
 
 class EvseV2G : public Everest::ModuleBase {
