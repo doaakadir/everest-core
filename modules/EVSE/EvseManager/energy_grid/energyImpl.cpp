@@ -392,11 +392,24 @@ bool energyImpl::random_delay_needed(float last_limit, float limit) {
 }
 
 void energyImpl::handle_enforce_limits(types::energy::EnforcedLimits& value) {
+    if (value.uuid != energy_flow_request.uuid) {
+        EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy enforce ignored self={} target={} valid_for={}s",
+                                  energy_flow_request.uuid, value.uuid, value.valid_for);
+        return;
+    }
+
+    EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy enforce begin self={} valid_for={}s",
+                              energy_flow_request.uuid, value.valid_for);
+
     if (value.uuid == energy_flow_request.uuid) {
         // EVLOG_info << "Incoming enforce limits" << value;
 
         // publish for e.g. OCPP module
+        EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy publish_enforced_limits begin self={}",
+                                  energy_flow_request.uuid);
         mod->p_evse->publish_enforced_limits(value);
+        EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy publish_enforced_limits end self={}",
+                                  energy_flow_request.uuid);
 
         //   set hardware limit
         float limit = 0.;
@@ -433,8 +446,12 @@ void energyImpl::handle_enforce_limits(types::energy::EnforcedLimits& value) {
 
         // apply watt limit
         if (value.limits_root_side.total_power_W.has_value()) {
+            EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy publish_max_watt begin self={} watt={}W",
+                                      energy_flow_request.uuid, value.limits_root_side.total_power_W.value().value);
             mod->mqtt.publish(fmt::format("everest_external/nodered/{}/state/max_watt", mod->config.connector_id),
                               value.limits_root_side.total_power_W.value().value);
+            EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy publish_max_watt end self={}",
+                                      energy_flow_request.uuid);
             // watt limit converted to current limit
             const float current_limit_power = value.limits_root_side.total_power_W.value().value /
                                               mod->config.ac_nominal_voltage / mod->ac_nr_phases_active;
@@ -504,23 +521,31 @@ void energyImpl::handle_enforce_limits(types::energy::EnforcedLimits& value) {
 
         // update limit at the charger
         const auto valid_until = steady_clock::now() + seconds(value.valid_for);
-        if (limit >= 0) {
-            // import
-            mod->charger->set_max_current(limit, valid_until);
-        } else {
-            // export
-            if (mod->session_is_iso_d20_ac_bpt()) {
-                mod->charger->set_max_current(limit, valid_until);
-            } else {
-                // FIXME: we cannot discharge on PWM charging or with -2, so we fake a charging current here.
-                mod->charger->set_max_current(0, valid_until);
-            }
+        float charger_limit = limit;
+        if (limit < 0 and not mod->session_is_iso_d20_ac_bpt()) {
+            // FIXME: we cannot discharge on PWM charging or with -2, so we fake a charging current here.
+            charger_limit = 0;
+        }
+        EVLOG_info << fmt::format(
+            "[ENERGY_DIAG] evse_energy set_max_current begin self={} limit={}A requested_limit={}A valid_for={}s",
+            energy_flow_request.uuid, charger_limit, limit, value.valid_for);
+        const bool set_max_current_result = mod->charger->set_max_current(charger_limit, valid_until);
+        EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy set_max_current end self={} result={}",
+                                  energy_flow_request.uuid, set_max_current_result);
+
+        if (limit > 1e-5 || limit < -1e-5) {
+            EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy resume_charging_power_available begin self={}",
+                                      energy_flow_request.uuid);
+            mod->charger->resume_charging_power_available();
+            EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy resume_charging_power_available end self={}",
+                                      energy_flow_request.uuid);
         }
 
-        if (limit > 1e-5 || limit < -1e-5)
-            mod->charger->resume_charging_power_available();
-
+        EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy signalNrOfPhasesAvailable begin self={} phases={}",
+                                  energy_flow_request.uuid, mod->ac_nr_phases_active);
         mod->signalNrOfPhasesAvailable(mod->ac_nr_phases_active);
+        EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy signalNrOfPhasesAvailable end self={}",
+                                  energy_flow_request.uuid);
 
         if (mod->config.charge_mode == "DC") {
             // DC mode apply limit at the leave side, we get root side limits here from EnergyManager on ACDC!
@@ -530,12 +555,21 @@ void energyImpl::handle_enforce_limits(types::energy::EnforcedLimits& value) {
                 float watt_leave_side = value.limits_root_side.total_power_W.value().value;
                 float ampere_root_side = value.limits_root_side.ac_max_current_A.value().value;
 
+                EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy get_ev_info begin self={}",
+                                          energy_flow_request.uuid);
                 auto ev_info = mod->get_ev_info();
                 float target_voltage = ev_info.target_voltage.value_or(0.);
                 float actual_voltage = ev_info.present_voltage.value_or(0.);
+                EVLOG_info << fmt::format(
+                    "[ENERGY_DIAG] evse_energy get_ev_info end self={} target_voltage={}V actual_voltage={}V",
+                    energy_flow_request.uuid, target_voltage, actual_voltage);
 
                 bool values_changed = true;
+                EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy get_powersupply_capabilities begin self={}",
+                                          energy_flow_request.uuid);
                 auto powersupply_capabilities = mod->get_powersupply_capabilities();
+                EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy get_powersupply_capabilities end self={}",
+                                          energy_flow_request.uuid);
 
                 // did the values change since the last call?
                 if (almost_eq(last_enforced_limits_watt, watt_leave_side) and
@@ -657,22 +691,46 @@ void energyImpl::handle_enforce_limits(types::energy::EnforcedLimits& value) {
                                   "Change HLC Limits: {}W/{}A, target_voltage {}, actual_voltage {}, bpt_active {}",
                                   evse_max_limits.evse_maximum_power_limit, evse_max_limits.evse_maximum_current_limit,
                                   target_voltage, actual_voltage, mod->is_actually_exporting_to_grid));
+                    EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy update_dc_maximum_limits begin self={}",
+                                              energy_flow_request.uuid);
                     mod->r_hlc[0]->call_update_dc_maximum_limits(evse_max_limits);
+                    EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy update_dc_maximum_limits end self={}",
+                                              energy_flow_request.uuid);
+                    EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy update_dc_minimum_limits begin self={}",
+                                              energy_flow_request.uuid);
                     mod->r_hlc[0]->call_update_dc_minimum_limits(evse_min_limits);
+                    EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy update_dc_minimum_limits end self={}",
+                                              energy_flow_request.uuid);
+                    EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy inform_new_evse_max_hlc_limits begin self={}",
+                                              energy_flow_request.uuid);
                     mod->charger->inform_new_evse_max_hlc_limits(evse_max_limits);
+                    EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy inform_new_evse_max_hlc_limits end self={}",
+                                              energy_flow_request.uuid);
+                    EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy inform_new_evse_min_hlc_limits begin self={}",
+                                              energy_flow_request.uuid);
                     mod->charger->inform_new_evse_min_hlc_limits(evse_min_limits);
+                    EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy inform_new_evse_min_hlc_limits end self={}",
+                                              energy_flow_request.uuid);
 
                     // This is just neccessary to switch between charging and discharging
                     if (target_voltage > 0) {
+                        EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy apply_new_target_voltage_current begin self={}",
+                                                  energy_flow_request.uuid);
                         mod->apply_new_target_voltage_current();
+                        EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy apply_new_target_voltage_current end self={}",
+                                                  energy_flow_request.uuid);
                     }
 
                     // Note: If the limits are lower then before, we could tell the DC power supply to
                     // ramp down already here instead of waiting for the car to request less power.
                     // Some cars may not like it, so we wait for the car to request less for now.
+                } else {
+                    EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy dc_limits unchanged self={}",
+                                              energy_flow_request.uuid);
                 }
             }
         }
+        EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy enforce end self={}", energy_flow_request.uuid);
     }
 }
 

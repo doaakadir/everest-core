@@ -191,9 +191,23 @@ void energyImpl::handle_enforce_limits(types::energy::EnforcedLimits& value) {
     // route to children if it is not for me
     // FIXME: this sends it to all children, we could do a lookup on which branch it actually is
     if (value.uuid != energy_flow_request.uuid) {
+        EVLOG_info << "[ENERGY_DIAG] energy_node enforce route begin node=" << energy_flow_request.uuid
+                   << " target=" << value.uuid << " valid_for=" << value.valid_for
+                   << "s children=" << mod->r_energy_consumer.size();
+        int child_index = 0;
         for (auto& entry : mod->r_energy_consumer) {
+            EVLOG_info << "[ENERGY_DIAG] energy_node forward begin node=" << energy_flow_request.uuid
+                       << " target=" << value.uuid << " child_index=" << child_index;
             entry->call_enforce_limits(value);
+            EVLOG_info << "[ENERGY_DIAG] energy_node forward end node=" << energy_flow_request.uuid
+                       << " target=" << value.uuid << " child_index=" << child_index;
+            child_index++;
         }
+        EVLOG_info << "[ENERGY_DIAG] energy_node enforce route end node=" << energy_flow_request.uuid
+                   << " target=" << value.uuid;
+    } else {
+        EVLOG_info << "[ENERGY_DIAG] energy_node enforce consumed by node=" << energy_flow_request.uuid
+                   << " target=" << value.uuid;
     }
 };
 

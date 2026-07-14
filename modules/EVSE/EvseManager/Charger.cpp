@@ -1090,26 +1090,40 @@ float Charger::ampere_to_duty_cycle(float ampere) {
 
 bool Charger::set_max_current(float c, std::chrono::time_point<std::chrono::steady_clock> validUntil) {
     float c_abs{std::fabs(c)};
+    const auto now = std::chrono::steady_clock::now();
+    const auto valid_for_ms = std::chrono::duration_cast<std::chrono::milliseconds>(validUntil - now).count();
+    EVLOG_info << fmt::format("[ENERGY_DIAG] charger set_max_current begin requested={}A abs={}A valid_for_ms={}", c,
+                              c_abs, valid_for_ms);
     if (c_abs <= CHARGER_ABSOLUTE_MAX_CURRENT) {
 
         // is it still valid?
-        if (validUntil > std::chrono::steady_clock::now()) {
+        if (validUntil > now) {
             {
                 Everest::scoped_lock_timeout lock(state_machine_mutex,
                                                   Everest::MutexDescription::Charger_set_max_current);
                 shared_context.max_current = c_abs;
                 shared_context.max_current_valid_until = validUntil;
             }
+            EVLOG_info << fmt::format("[ENERGY_DIAG] charger set_max_current state_updated requested={}A", c);
             // now after max_current is updated with c_abs we can update c_abs with the internal max current which
             // considers the cable limit as well
             c_abs = get_max_current_internal();
+            EVLOG_info << fmt::format("[ENERGY_DIAG] charger set_overcurrent_limit begin effective={}A", c_abs);
             bsp->set_overcurrent_limit(c_abs);
+            EVLOG_info << fmt::format("[ENERGY_DIAG] charger set_overcurrent_limit end effective={}A", c_abs);
             // the max_current is internally an absolute value. The sign of c is now used to signal
             // if it is charging (c>0) or discharging (c<0)
+            EVLOG_info << fmt::format("[ENERGY_DIAG] charger signal_max_current begin effective={}A",
+                                      c < 0.0f ? -c_abs : c_abs);
             signal_max_current(c < 0.0f ? -c_abs : c_abs);
+            EVLOG_info << fmt::format("[ENERGY_DIAG] charger set_max_current accepted requested={}A effective={}A", c,
+                                      c < 0.0f ? -c_abs : c_abs);
             return true;
         }
     }
+    EVLOG_warning << fmt::format(
+        "[ENERGY_DIAG] charger set_max_current rejected requested={}A abs={}A valid_for_ms={} max_allowed={}A", c,
+        c_abs, valid_for_ms, CHARGER_ABSOLUTE_MAX_CURRENT);
     return false;
 }
 

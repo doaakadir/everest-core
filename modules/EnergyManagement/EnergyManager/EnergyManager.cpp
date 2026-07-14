@@ -29,13 +29,20 @@ void EnergyManager::init() {
     const auto enforce_limits_callback = [this](const std::vector<types::energy::EnforcedLimits>& limits) {
         const types::energy::NumberWithSource nonumber = {-9999.0};
         const types::energy::IntegerWithSource noint = {-9999};
+        EVLOG_info << fmt::format("[ENERGY_DIAG] energy_manager enforce callback count={}", limits.size());
         for (const auto& it : limits) {
+            const auto ampere = it.limits_root_side.ac_max_current_A.value_or(nonumber).value;
+            const auto watt = it.limits_root_side.total_power_W.value_or(nonumber).value;
+            const auto phases = it.limits_root_side.ac_max_phase_count.value_or(noint).value;
             if (globals.debug)
-                EVLOG_info << fmt::format("\033[1;92m{} Enforce limits {}A {}W {} ph\033[1;0m", it.uuid,
-                                          it.limits_root_side.ac_max_current_A.value_or(nonumber).value,
-                                          it.limits_root_side.total_power_W.value_or(nonumber).value,
-                                          it.limits_root_side.ac_max_phase_count.value_or(noint).value);
+                EVLOG_info << fmt::format("\033[1;92m{} Enforce limits {}A {}W {} ph\033[1;0m", it.uuid, ampere, watt,
+                                          phases);
+            EVLOG_info << fmt::format(
+                "[ENERGY_DIAG] energy_manager call_enforce_limits begin uuid={} valid_for={}s ampere={}A watt={}W "
+                "phases={}",
+                it.uuid, it.valid_for, ampere, watt, phases);
             r_energy_trunk->call_enforce_limits(it);
+            EVLOG_info << fmt::format("[ENERGY_DIAG] energy_manager call_enforce_limits end uuid={}", it.uuid);
         }
     };
 
