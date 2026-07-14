@@ -14,7 +14,11 @@
 
 // ev@75ac1216-19eb-4182-a85c-820f1fc2c091:v1
 // insert your custom include headers here
+#include <cstddef>
 #include <mutex>
+#include <optional>
+#include <string>
+#include <vector>
 // ev@75ac1216-19eb-4182-a85c-820f1fc2c091:v1
 
 namespace module {
@@ -62,8 +66,10 @@ private:
     void set_external_limits(types::energy::ExternalLimits& l);
     void merge_price_into_schedule(std::vector<types::energy::ScheduleReqEntry>& schedule,
                                    const std::vector<types::energy_price_information::PricePerkWh>& price);
+    std::optional<std::size_t> find_child_index_for_uuid_locked(const std::string& uuid) const;
 
     std::string source_cfg;
+    std::vector<std::optional<types::energy::EnergyFlowRequest>> child_energy_flow_requests;
     // ev@3370e4dd-95f4-47a9-aaec-ea76f34a66c9:v1
 };
 

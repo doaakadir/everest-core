@@ -10,6 +10,22 @@
 namespace module {
 namespace energy_grid {
 
+namespace {
+bool energy_flow_request_contains_uuid(const types::energy::EnergyFlowRequest& request, const std::string& uuid) {
+    if (request.uuid == uuid) {
+        return true;
+    }
+
+    for (const auto& child : request.children) {
+        if (energy_flow_request_contains_uuid(child, uuid)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+} // namespace
+
 void energyImpl::init() {
 
     // UUID must be unique also beyond this charging station -> will be handled on framework level and above later
@@ -22,10 +38,17 @@ void energyImpl::init() {
     energy_flow_request.schedule_import = get_local_schedule();
     energy_flow_request.schedule_export = get_local_schedule();
 
+    child_energy_flow_requests.resize(mod->r_energy_consumer.size());
+    std::size_t child_index = 0;
     for (auto& entry : mod->r_energy_consumer) {
-        entry->subscribe_energy_flow_request([this](types::energy::EnergyFlowRequest e) {
+        const auto index = child_index++;
+        entry->subscribe_energy_flow_request([this, index](types::energy::EnergyFlowRequest e) {
             // Received new energy_flow_request object from a child. Update in the cached object and republish.
             std::scoped_lock lock(energy_mutex);
+
+            if (index < child_energy_flow_requests.size()) {
+                child_energy_flow_requests[index] = e;
+            }
 
             bool child_found = false;
             for (auto& child : energy_flow_request.children) {
@@ -186,22 +209,50 @@ void energyImpl::ready() {
     mod->signalExternalLimit.connect([this](types::energy::ExternalLimits& l) { set_external_limits(l); });
 }
 
+std::optional<std::size_t> energyImpl::find_child_index_for_uuid_locked(const std::string& uuid) const {
+    for (std::size_t index = 0; index < child_energy_flow_requests.size(); ++index) {
+        if (child_energy_flow_requests[index].has_value() &&
+            energy_flow_request_contains_uuid(child_energy_flow_requests[index].value(), uuid)) {
+            return index;
+        }
+    }
+
+    return std::nullopt;
+}
+
 void energyImpl::handle_enforce_limits(types::energy::EnforcedLimits& value) {
 
     // route to children if it is not for me
-    // FIXME: this sends it to all children, we could do a lookup on which branch it actually is
     if (value.uuid != energy_flow_request.uuid) {
         EVLOG_info << "[ENERGY_DIAG] energy_node enforce route begin node=" << energy_flow_request.uuid
                    << " target=" << value.uuid << " valid_for=" << value.valid_for
                    << "s children=" << mod->r_energy_consumer.size();
-        int child_index = 0;
-        for (auto& entry : mod->r_energy_consumer) {
+
+        std::optional<std::size_t> routed_child_index;
+        {
+            std::scoped_lock lock(energy_mutex);
+            routed_child_index = find_child_index_for_uuid_locked(value.uuid);
+        }
+
+        if (routed_child_index.has_value() && routed_child_index.value() < mod->r_energy_consumer.size()) {
+            const auto child_index = routed_child_index.value();
             EVLOG_info << "[ENERGY_DIAG] energy_node forward begin node=" << energy_flow_request.uuid
                        << " target=" << value.uuid << " child_index=" << child_index;
-            entry->call_enforce_limits(value);
+            mod->r_energy_consumer[child_index]->call_enforce_limits(value);
             EVLOG_info << "[ENERGY_DIAG] energy_node forward end node=" << energy_flow_request.uuid
                        << " target=" << value.uuid << " child_index=" << child_index;
-            child_index++;
+        } else {
+            EVLOG_warning << "[ENERGY_DIAG] energy_node target branch unknown, broadcasting fallback node="
+                          << energy_flow_request.uuid << " target=" << value.uuid;
+            int child_index = 0;
+            for (auto& entry : mod->r_energy_consumer) {
+                EVLOG_info << "[ENERGY_DIAG] energy_node forward begin node=" << energy_flow_request.uuid
+                           << " target=" << value.uuid << " child_index=" << child_index;
+                entry->call_enforce_limits(value);
+                EVLOG_info << "[ENERGY_DIAG] energy_node forward end node=" << energy_flow_request.uuid
+                           << " target=" << value.uuid << " child_index=" << child_index;
+                child_index++;
+            }
         }
         EVLOG_info << "[ENERGY_DIAG] energy_node enforce route end node=" << energy_flow_request.uuid
                    << " target=" << value.uuid;
