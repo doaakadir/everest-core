@@ -3,6 +3,8 @@
 
 #include "ErrorHandling.hpp"
 
+#include "everest/logging.hpp"
+
 namespace {
 std::string generate_description(const Everest::error::Error& error) {
     std::string result;
@@ -232,6 +234,10 @@ void ErrorHandling::raise_inoperative_error(const Everest::error::Error& caused_
         // dont raise if already raised
         return;
     }
+
+    EVLOG_warning << "[ENERGY_DIAG] fatal error prevents charging type=" << caused_by.type
+                  << " sub_type=" << caused_by.sub_type << " severity=" << static_cast<int>(caused_by.severity)
+                  << " description=" << caused_by.description << " vendor_id=" << caused_by.vendor_id;
 
     // raise externally
     Everest::error::Error error_object = p_evse->error_factory->create_error(
