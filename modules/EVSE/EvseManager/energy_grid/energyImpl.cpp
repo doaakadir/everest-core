@@ -712,13 +712,13 @@ void energyImpl::handle_enforce_limits(types::energy::EnforcedLimits& value) {
                     EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy inform_new_evse_min_hlc_limits end self={}",
                                               energy_flow_request.uuid);
 
-                    // EnergyManager updates limits here. Target voltage/current setpoints are owned by
-                    // the HLC target callbacks; applying them here performs a synchronous PSU command and
-                    // can block the energy limit refresh path behind CurrentDemand traffic.
+                    // This is just neccessary to switch between charging and discharging
                     if (target_voltage > 0) {
-                        EVLOG_info << fmt::format(
-                            "[ENERGY_DIAG] evse_energy apply_new_target_voltage_current skipped self={} reason=limit_update",
-                            energy_flow_request.uuid);
+                        EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy apply_new_target_voltage_current begin self={}",
+                                                  energy_flow_request.uuid);
+                        mod->apply_new_target_voltage_current();
+                        EVLOG_info << fmt::format("[ENERGY_DIAG] evse_energy apply_new_target_voltage_current end self={}",
+                                                  energy_flow_request.uuid);
                     }
 
                     // Note: If the limits are lower then before, we could tell the DC power supply to
