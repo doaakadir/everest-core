@@ -5,6 +5,7 @@
 
 #include "../../evse_logging_utils.hpp"
 
+#include <chrono>
 #include <date/date.h>
 #include <date/tz.h>
 #include <utils/date.hpp>
@@ -363,13 +364,20 @@ bool evse_managerImpl::handle_enable_disable(int& connector_id, types::evse_mana
 
 void evse_managerImpl::handle_authorize_response(types::authorization::ProvidedIdToken& provided_token,
                                                  types::authorization::ValidationResult& validation_result) {
+    const auto start = std::chrono::steady_clock::now();
     const auto pnc = provided_token.authorization_type == types::authorization::AuthorizationType::PlugAndCharge;
+    EVLOG_info << fmt::format("[ENERGY_DIAG] evse authorize_response begin status={} pnc={}",
+                              static_cast<int>(validation_result.authorization_status), pnc);
 
     if (validation_result.authorization_status == types::authorization::AuthorizationStatus::Accepted) {
 
         if (this->mod->get_hlc_waiting_for_auth_pnc() && !pnc) {
             EVLOG_info
                 << "EvseManager received Authorization other than PnC while waiting for PnC. This has no effect.";
+            const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - start)
+                                         .count();
+            EVLOG_info << fmt::format("[ENERGY_DIAG] evse authorize_response ignored duration_ms={}", duration_ms);
             return;
         }
 
@@ -392,6 +400,10 @@ void evse_managerImpl::handle_authorize_response(types::authorization::ProvidedI
             validation_result.authorization_status,
             validation_result.certificate_status.value_or(types::authorization::CertificateStatus::Accepted));
     }
+
+    const auto duration_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+    EVLOG_info << fmt::format("[ENERGY_DIAG] evse authorize_response end duration_ms={}", duration_ms);
 };
 
 void evse_managerImpl::handle_withdraw_authorization() {

@@ -892,8 +892,17 @@ void EvseManager::ready() {
                 (not config.dbg_hlc_auth_after_tstep and charger->get_authorized_eim())) {
                 hlc_waiting_for_auth_eim = false;
                 hlc_waiting_for_auth_pnc = false;
+                const auto auth_response_start = std::chrono::steady_clock::now();
+                EVLOG_info << "[ENERGY_DIAG] hlc authorization_response begin reason=require_auth_eim_already_authorized";
                 r_hlc[0]->call_authorization_response(types::authorization::AuthorizationStatus::Accepted,
                                                       types::authorization::CertificateStatus::NoCertificateAvailable);
+                const auto auth_response_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                           std::chrono::steady_clock::now() - auth_response_start)
+                                                           .count();
+                EVLOG_info << fmt::format(
+                    "[ENERGY_DIAG] hlc authorization_response end reason=require_auth_eim_already_authorized "
+                    "duration_ms={}",
+                    auth_response_duration_ms);
                 charger->get_stopwatch().mark("Auth EIM Done");
             } else {
                 if (config.enable_autocharge) {
@@ -1734,18 +1743,32 @@ void EvseManager::log_v2g_message(types::iso15118::V2gMessages v2g_messages) {
 void EvseManager::charger_was_authorized() {
 
     if (hlc_waiting_for_auth_pnc and charger->get_authorized_pnc()) {
-        r_hlc[0]->call_authorization_response(types::authorization::AuthorizationStatus::Accepted,
-                                              types::authorization::CertificateStatus::Accepted);
         hlc_waiting_for_auth_eim = false;
         hlc_waiting_for_auth_pnc = false;
+        const auto auth_response_start = std::chrono::steady_clock::now();
+        EVLOG_info << "[ENERGY_DIAG] hlc authorization_response begin reason=charger_auth_pnc";
+        r_hlc[0]->call_authorization_response(types::authorization::AuthorizationStatus::Accepted,
+                                              types::authorization::CertificateStatus::Accepted);
+        const auto auth_response_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                   std::chrono::steady_clock::now() - auth_response_start)
+                                                   .count();
+        EVLOG_info << fmt::format("[ENERGY_DIAG] hlc authorization_response end reason=charger_auth_pnc duration_ms={}",
+                                  auth_response_duration_ms);
         charger->get_stopwatch().mark("Auth PnC Done");
     }
 
     if (hlc_waiting_for_auth_eim and charger->get_authorized_eim()) {
-        r_hlc[0]->call_authorization_response(types::authorization::AuthorizationStatus::Accepted,
-                                              types::authorization::CertificateStatus::NoCertificateAvailable);
         hlc_waiting_for_auth_eim = false;
         hlc_waiting_for_auth_pnc = false;
+        const auto auth_response_start = std::chrono::steady_clock::now();
+        EVLOG_info << "[ENERGY_DIAG] hlc authorization_response begin reason=charger_auth_eim";
+        r_hlc[0]->call_authorization_response(types::authorization::AuthorizationStatus::Accepted,
+                                              types::authorization::CertificateStatus::NoCertificateAvailable);
+        const auto auth_response_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                   std::chrono::steady_clock::now() - auth_response_start)
+                                                   .count();
+        EVLOG_info << fmt::format("[ENERGY_DIAG] hlc authorization_response end reason=charger_auth_eim duration_ms={}",
+                                  auth_response_duration_ms);
         charger->get_stopwatch().mark("Auth EIM Done");
     }
 }

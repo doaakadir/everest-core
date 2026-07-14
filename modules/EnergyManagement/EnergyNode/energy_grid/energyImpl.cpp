@@ -238,9 +238,14 @@ void energyImpl::handle_enforce_limits(types::energy::EnforcedLimits& value) {
             const auto child_index = routed_child_index.value();
             EVLOG_info << "[ENERGY_DIAG] energy_node forward begin node=" << energy_flow_request.uuid
                        << " target=" << value.uuid << " child_index=" << child_index;
+            const auto forward_start = std::chrono::steady_clock::now();
             mod->r_energy_consumer[child_index]->call_enforce_limits(value);
+            const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - forward_start)
+                                         .count();
             EVLOG_info << "[ENERGY_DIAG] energy_node forward end node=" << energy_flow_request.uuid
-                       << " target=" << value.uuid << " child_index=" << child_index;
+                       << " target=" << value.uuid << " child_index=" << child_index
+                       << " duration_ms=" << duration_ms;
         } else {
             EVLOG_warning << "[ENERGY_DIAG] energy_node target branch unknown, broadcasting fallback node="
                           << energy_flow_request.uuid << " target=" << value.uuid;
@@ -248,9 +253,14 @@ void energyImpl::handle_enforce_limits(types::energy::EnforcedLimits& value) {
             for (auto& entry : mod->r_energy_consumer) {
                 EVLOG_info << "[ENERGY_DIAG] energy_node forward begin node=" << energy_flow_request.uuid
                            << " target=" << value.uuid << " child_index=" << child_index;
+                const auto forward_start = std::chrono::steady_clock::now();
                 entry->call_enforce_limits(value);
+                const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                             std::chrono::steady_clock::now() - forward_start)
+                                             .count();
                 EVLOG_info << "[ENERGY_DIAG] energy_node forward end node=" << energy_flow_request.uuid
-                           << " target=" << value.uuid << " child_index=" << child_index;
+                           << " target=" << value.uuid << " child_index=" << child_index
+                           << " duration_ms=" << duration_ms;
                 child_index++;
             }
         }

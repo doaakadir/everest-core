@@ -2,6 +2,8 @@
 // Copyright Pionix GmbH and Contributors to EVerest
 #include <everest/helpers/helpers.hpp>
 
+#include <chrono>
+#include <fmt/core.h>
 #include <utility>
 
 #include "Auth.hpp"
@@ -72,7 +74,15 @@ void Auth::ready() {
 
     this->auth_handler->register_notify_evse_callback(
         [this](const int evse_index, const ProvidedIdToken& provided_token, const ValidationResult& validation_result) {
+            const auto start = std::chrono::steady_clock::now();
+            EVLOG_info << fmt::format("[ENERGY_DIAG] auth call_authorize_response begin evse_index={} status={}",
+                                      evse_index, static_cast<int>(validation_result.authorization_status));
             this->r_evse_manager.at(evse_index)->call_authorize_response(provided_token, validation_result);
+            const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - start)
+                                         .count();
+            EVLOG_info << fmt::format("[ENERGY_DIAG] auth call_authorize_response end evse_index={} duration_ms={}",
+                                      evse_index, duration_ms);
         });
     this->auth_handler->register_withdraw_authorization_callback(
         [this](const int32_t evse_index) { this->r_evse_manager.at(evse_index)->call_withdraw_authorization(); });
