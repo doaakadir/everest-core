@@ -3,12 +3,17 @@
 
 #include <utils/message_handler.hpp>
 
+#include <chrono>
 #include <everest/logging.hpp>
 #include <fmt/format.h>
 
 namespace Everest {
 
 namespace {
+constexpr std::size_t OP_QUEUE_BACKLOG_WARN_THRESHOLD = 20;
+constexpr auto OP_QUEUE_WAIT_WARN_THRESHOLD = std::chrono::milliseconds(500);
+constexpr auto OP_QUEUE_HANDLE_WARN_THRESHOLD = std::chrono::milliseconds(20);
+
 // Helper to split string by delimiter
 std::vector<std::string> split_topic(const std::string& topic, char delimiter = '/') {
     std::vector<std::string> result;
@@ -59,6 +64,17 @@ bool check_topic_matches(const std::string& full_topic, const std::string& wildc
 
     return full_split.size() == wildcard_split.size();
 }
+
+std::string message_type_label(const json& payload) {
+    if (payload.is_object() && payload.contains("msg_type") && payload.at("msg_type").is_string()) {
+        return payload.at("msg_type").get<std::string>();
+    }
+    return "ExternalMQTT";
+}
+
+bool is_enforce_limits_topic(const std::string& topic) {
+    return topic.find("/cmd/enforce_limits") != std::string::npos;
+}
 } // namespace
 
 MessageHandler::MessageHandler() {
@@ -93,11 +109,18 @@ void MessageHandler::add(const ParsedMessage& message) {
         ready_thread =
             std::thread([this, topic_copy, data_copy] { (*global_ready_handler->handler)(topic_copy, data_copy); });
     } else {
+        std::size_t queue_size = 0;
         {
             std::lock_guard<std::mutex> lock(operation_queue_mutex);
             operation_message_queue.push(message);
+            queue_size = operation_message_queue.size();
         }
         operation_cv.notify_all();
+
+        if (queue_size >= OP_QUEUE_BACKLOG_WARN_THRESHOLD || is_enforce_limits_topic(message.topic)) {
+            EVLOG_warning << "[OP_QUEUE_DIAG] enqueue type=" << message_type_label(message.data)
+                          << " topic=" << message.topic << " queue_size=" << queue_size;
+        }
     }
 }
 
@@ -131,9 +154,29 @@ void MessageHandler::run_operation_message_worker() {
 
         ParsedMessage message = std::move(operation_message_queue.front());
         operation_message_queue.pop();
+        const auto remaining_queue_size = operation_message_queue.size();
         lock.unlock();
 
+        const auto wait_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - message.queued_at)
+                .count();
+        const bool enforce_limits = is_enforce_limits_topic(message.topic);
+        const bool backlog = remaining_queue_size >= OP_QUEUE_BACKLOG_WARN_THRESHOLD;
+        if (enforce_limits || backlog || wait_ms >= OP_QUEUE_WAIT_WARN_THRESHOLD.count()) {
+            EVLOG_warning << "[OP_QUEUE_DIAG] pop type=" << message_type_label(message.data)
+                          << " topic=" << message.topic << " wait_ms=" << wait_ms
+                          << " remaining_queue_size=" << remaining_queue_size;
+        }
+
+        const auto handle_start = std::chrono::steady_clock::now();
         handle_operation_message(message.topic, message.data);
+        const auto handle_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - handle_start)
+                .count();
+        if (enforce_limits || handle_ms >= OP_QUEUE_HANDLE_WARN_THRESHOLD.count()) {
+            EVLOG_warning << "[OP_QUEUE_DIAG] handled type=" << message_type_label(message.data)
+                          << " topic=" << message.topic << " duration_ms=" << handle_ms;
+        }
     }
     EVLOG_info << "Main worker thread stopped";
 }

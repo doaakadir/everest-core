@@ -3,6 +3,7 @@
 #ifndef UTILS_MESSAGE_QUEUE_HPP
 #define UTILS_MESSAGE_QUEUE_HPP
 
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <functional>
@@ -27,6 +28,7 @@ struct Message {
 struct ParsedMessage {
     std::string topic;
     json data;
+    std::chrono::steady_clock::time_point queued_at = std::chrono::steady_clock::now();
 };
 
 using MessageCallback = std::function<void(const Message&)>;
