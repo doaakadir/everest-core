@@ -33,7 +33,8 @@ void log_shutdown_source(const int local_diagnostics, const char* shutdown_type,
             << shutdown_type << " requested by blocking error type=" << blocking_error->type
             << " sub_type=" << blocking_error->sub_type
             << " severity=" << static_cast<int>(blocking_error->severity)
-            << " description=" << blocking_error->description << " vendor_id=" << blocking_error->vendor_id;
+            << " description=" << blocking_error->description << " message=" << blocking_error->message
+            << " vendor_id=" << blocking_error->vendor_id;
     } else {
         LOCAL_DIAG(local_diagnostics, LocalDiagnostics::Level::Warning, LocalDiagnostics::Category::Error)
             << shutdown_type << " requested but no active blocking error was found";
