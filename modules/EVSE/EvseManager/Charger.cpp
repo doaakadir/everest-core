@@ -24,6 +24,24 @@
 #include "scoped_lock_timeout.hpp"
 #include "utils.hpp"
 
+namespace {
+
+void log_shutdown_source(const int local_diagnostics, const char* shutdown_type,
+                         const std::optional<Everest::error::Error>& blocking_error) {
+    if (blocking_error) {
+        LOCAL_DIAG(local_diagnostics, LocalDiagnostics::Level::Warning, LocalDiagnostics::Category::Error)
+            << shutdown_type << " requested by blocking error type=" << blocking_error->type
+            << " sub_type=" << blocking_error->sub_type
+            << " severity=" << static_cast<int>(blocking_error->severity)
+            << " description=" << blocking_error->description << " vendor_id=" << blocking_error->vendor_id;
+    } else {
+        LOCAL_DIAG(local_diagnostics, LocalDiagnostics::Level::Warning, LocalDiagnostics::Category::Error)
+            << shutdown_type << " requested but no active blocking error was found";
+    }
+}
+
+} // namespace
+
 namespace module {
 
 Charger::Charger(const std::unique_ptr<IECStateMachine>& bsp, const std::unique_ptr<ErrorHandling>& error_handling,
@@ -2047,12 +2065,16 @@ bool Charger::stop_charging_on_fatal_error_internal() {
     if (shared_context.shutdown_type == ShutdownType::EmergencyShutdown) {
         if (shared_context.last_shutdown_type != ShutdownType::EmergencyShutdown) {
             internal_context.fatal_error_became_active = std::chrono::steady_clock::now();
+            log_shutdown_source(config_context.local_diagnostics, "emergency_shutdown",
+                                error_handling->error_preventing_charging_for_diagnostics());
             emergency_shutdown();
         }
         err = true;
     } else if (shared_context.shutdown_type == ShutdownType::ErrorShutdown) {
         if (shared_context.last_shutdown_type != ShutdownType::ErrorShutdown) {
             internal_context.fatal_error_became_active = std::chrono::steady_clock::now();
+            log_shutdown_source(config_context.local_diagnostics, "error_shutdown",
+                                error_handling->error_preventing_charging_for_diagnostics());
             error_shutdown();
         }
         err = true;

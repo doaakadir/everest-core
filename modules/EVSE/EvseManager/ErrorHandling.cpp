@@ -229,6 +229,10 @@ std::optional<Everest::error::Error> ErrorHandling::errors_prevent_charging() {
     return std::nullopt;
 }
 
+std::optional<Everest::error::Error> ErrorHandling::error_preventing_charging_for_diagnostics() {
+    return errors_prevent_charging();
+}
+
 void ErrorHandling::raise_inoperative_error(const Everest::error::Error& caused_by) {
     if (p_evse->error_state_monitor->is_error_active("evse_manager/Inoperative", "")) {
         // dont raise if already raised

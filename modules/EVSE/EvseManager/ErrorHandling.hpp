@@ -94,6 +94,8 @@ public:
     void raise_cable_check_fault(const std::string& description);
     void clear_cable_check_fault();
 
+    std::optional<Everest::error::Error> error_preventing_charging_for_diagnostics();
+
 protected:
     void raise_inoperative_error(const Everest::error::Error& caused_by);
 

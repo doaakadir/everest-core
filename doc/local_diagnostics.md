@@ -22,6 +22,21 @@ Module configuration uses an integer `local_diagnostics` field:
 Framework-level diagnostics use the same level semantics through the
 `LOCAL_DIAGNOSTICS` environment variable.
 
+For deployments, prefer keeping these variables in a small env file that is
+sourced by the manager startup script before `manager` is executed. This keeps
+framework diagnostics configurable without editing C++ code or the main EVerest
+YAML config.
+
+Example deployment file:
+
+```bash
+LOCAL_DIAGNOSTICS=2
+LOCAL_OP_QUEUE_DIAG_TOPIC_FILTER=/cmd/enforce_limits
+LOCAL_OP_QUEUE_DIAG_BACKLOG_THRESHOLD=20
+LOCAL_OP_QUEUE_DIAG_WAIT_MS=200
+LOCAL_OP_QUEUE_DIAG_HANDLE_MS=20
+```
+
 ## Module Usage
 
 Include the helper and emit diagnostics through the single `LOCAL_DIAG` macro:
@@ -47,11 +62,11 @@ configuration and pass it into `LOCAL_DIAG`.
 
 Current operation queue diagnostics are enabled with:
 
-```powershell
-$env:LOCAL_DIAGNOSTICS="2"
-$env:LOCAL_OP_QUEUE_DIAG_TOPIC_FILTER="/cmd/enforce_limits"
-$env:LOCAL_OP_QUEUE_DIAG_WAIT_MS="200"
-$env:LOCAL_OP_QUEUE_DIAG_HANDLE_MS="20"
+```bash
+export LOCAL_DIAGNOSTICS=2
+export LOCAL_OP_QUEUE_DIAG_TOPIC_FILTER=/cmd/enforce_limits
+export LOCAL_OP_QUEUE_DIAG_WAIT_MS=200
+export LOCAL_OP_QUEUE_DIAG_HANDLE_MS=20
 ```
 
 ## Categories
@@ -63,6 +78,7 @@ Existing categories:
 
 - `Energy`
 - `Auth`
+- `Error`
 - `Framework`
 
 ## Output

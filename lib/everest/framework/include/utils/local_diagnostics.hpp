@@ -18,6 +18,7 @@ enum class Level {
 namespace Category {
 inline constexpr const char* Energy = "energy";
 inline constexpr const char* Auth = "auth";
+inline constexpr const char* Error = "error";
 inline constexpr const char* Framework = "framework";
 } // namespace Category
 
