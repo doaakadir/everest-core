@@ -31,6 +31,7 @@ struct Conf {
     double slice_ampere;
     double slice_watt;
     bool debug;
+    int local_diagnostics;
     std::string switch_3ph1ph_while_charging_mode;
     int switch_3ph1ph_max_nr_of_switches_per_session;
     std::string switch_3ph1ph_switch_limit_stickyness;

@@ -34,6 +34,12 @@ config:
     description: "Unsupported: request receipt from EV with HLC"
     type: boolean
     default: false
+  local_diagnostics:
+    description: "Local diagnostic log level: 0=disabled, 1=info, 2=info+warning, 3=info+warning+debug."
+    type: integer
+    minimum: 0
+    maximum: 3
+    default: 0
   session_logging:
     description: Enable/Disable session log file output
     type: boolean

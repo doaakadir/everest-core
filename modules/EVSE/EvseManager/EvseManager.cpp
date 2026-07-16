@@ -6,6 +6,7 @@
 #include <chrono>
 #include <fmt/color.h>
 #include <fmt/core.h>
+#include <utils/local_diagnostics.hpp>
 
 #include "IECStateMachine.hpp"
 #include "SessionLog.hpp"
@@ -893,16 +894,16 @@ void EvseManager::ready() {
                 hlc_waiting_for_auth_eim = false;
                 hlc_waiting_for_auth_pnc = false;
                 const auto auth_response_start = std::chrono::steady_clock::now();
-                EVLOG_info << "[ENERGY_DIAG] hlc authorization_response begin reason=require_auth_eim_already_authorized";
+                LOCAL_DIAG(config.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Auth)
+                    << "hlc authorization_response begin reason=require_auth_eim_already_authorized";
                 r_hlc[0]->call_authorization_response(types::authorization::AuthorizationStatus::Accepted,
                                                       types::authorization::CertificateStatus::NoCertificateAvailable);
                 const auto auth_response_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                                            std::chrono::steady_clock::now() - auth_response_start)
                                                            .count();
-                EVLOG_info << fmt::format(
-                    "[ENERGY_DIAG] hlc authorization_response end reason=require_auth_eim_already_authorized "
-                    "duration_ms={}",
-                    auth_response_duration_ms);
+                LOCAL_DIAG(config.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Auth)
+                    << "hlc authorization_response end reason=require_auth_eim_already_authorized duration_ms="
+                    << auth_response_duration_ms;
                 charger->get_stopwatch().mark("Auth EIM Done");
             } else {
                 if (config.enable_autocharge) {
@@ -1245,7 +1246,7 @@ void EvseManager::ready() {
                        config.switch_3ph1ph_delay_s, config.switch_3ph1ph_cp_state, config.soft_over_current_timeout_ms,
                        config.state_F_after_fault_ms, config.fail_on_powermeter_errors, config.raise_mrec9,
                        config.sleep_before_enabling_pwm_hlc_mode_ms,
-                       utils::get_session_id_type_from_string(config.session_id_type));
+                       utils::get_session_id_type_from_string(config.session_id_type), config.local_diagnostics);
     }
 
     telemetryThreadHandle = std::thread([this]() {
@@ -1436,7 +1437,7 @@ void EvseManager::setup_fake_DC_mode() {
                    config.soft_over_current_measurement_noise_A, config.switch_3ph1ph_delay_s,
                    config.switch_3ph1ph_cp_state, config.soft_over_current_timeout_ms, config.state_F_after_fault_ms,
                    config.fail_on_powermeter_errors, config.raise_mrec9, config.sleep_before_enabling_pwm_hlc_mode_ms,
-                   utils::get_session_id_type_from_string(config.session_id_type));
+                   utils::get_session_id_type_from_string(config.session_id_type), config.local_diagnostics);
 
     types::iso15118::EVSEID evseid = {config.evse_id, config.evse_id_din};
 
@@ -1477,7 +1478,7 @@ void EvseManager::setup_AC_mode() {
                    config.soft_over_current_measurement_noise_A, config.switch_3ph1ph_delay_s,
                    config.switch_3ph1ph_cp_state, config.soft_over_current_timeout_ms, config.state_F_after_fault_ms,
                    config.fail_on_powermeter_errors, config.raise_mrec9, config.sleep_before_enabling_pwm_hlc_mode_ms,
-                   utils::get_session_id_type_from_string(config.session_id_type));
+                   utils::get_session_id_type_from_string(config.session_id_type), config.local_diagnostics);
 
     types::iso15118::EVSEID evseid = {config.evse_id, config.evse_id_din};
 
@@ -1746,14 +1747,15 @@ void EvseManager::charger_was_authorized() {
         hlc_waiting_for_auth_eim = false;
         hlc_waiting_for_auth_pnc = false;
         const auto auth_response_start = std::chrono::steady_clock::now();
-        EVLOG_info << "[ENERGY_DIAG] hlc authorization_response begin reason=charger_auth_pnc";
+        LOCAL_DIAG(config.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Auth)
+            << "hlc authorization_response begin reason=charger_auth_pnc";
         r_hlc[0]->call_authorization_response(types::authorization::AuthorizationStatus::Accepted,
                                               types::authorization::CertificateStatus::Accepted);
         const auto auth_response_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                                    std::chrono::steady_clock::now() - auth_response_start)
                                                    .count();
-        EVLOG_info << fmt::format("[ENERGY_DIAG] hlc authorization_response end reason=charger_auth_pnc duration_ms={}",
-                                  auth_response_duration_ms);
+        LOCAL_DIAG(config.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Auth)
+            << "hlc authorization_response end reason=charger_auth_pnc duration_ms=" << auth_response_duration_ms;
         charger->get_stopwatch().mark("Auth PnC Done");
     }
 
@@ -1761,14 +1763,15 @@ void EvseManager::charger_was_authorized() {
         hlc_waiting_for_auth_eim = false;
         hlc_waiting_for_auth_pnc = false;
         const auto auth_response_start = std::chrono::steady_clock::now();
-        EVLOG_info << "[ENERGY_DIAG] hlc authorization_response begin reason=charger_auth_eim";
+        LOCAL_DIAG(config.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Auth)
+            << "hlc authorization_response begin reason=charger_auth_eim";
         r_hlc[0]->call_authorization_response(types::authorization::AuthorizationStatus::Accepted,
                                               types::authorization::CertificateStatus::NoCertificateAvailable);
         const auto auth_response_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                                    std::chrono::steady_clock::now() - auth_response_start)
                                                    .count();
-        EVLOG_info << fmt::format("[ENERGY_DIAG] hlc authorization_response end reason=charger_auth_eim duration_ms={}",
-                                  auth_response_duration_ms);
+        LOCAL_DIAG(config.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Auth)
+            << "hlc authorization_response end reason=charger_auth_eim duration_ms=" << auth_response_duration_ms;
         charger->get_stopwatch().mark("Auth EIM Done");
     }
 }

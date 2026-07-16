@@ -3,9 +3,19 @@
 
 #include <utils/message_handler.hpp>
 
+#include <utils/local_diagnostics.hpp>
+
+#include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <cstdint>
+#include <cstdlib>
 #include <everest/logging.hpp>
+#include <exception>
 #include <fmt/format.h>
+#include <sstream>
+#include <string>
+#include <vector>
 
 namespace Everest {
 
@@ -13,6 +23,99 @@ namespace {
 constexpr std::size_t OP_QUEUE_BACKLOG_WARN_THRESHOLD = 20;
 constexpr auto OP_QUEUE_WAIT_WARN_THRESHOLD = std::chrono::milliseconds(500);
 constexpr auto OP_QUEUE_HANDLE_WARN_THRESHOLD = std::chrono::milliseconds(20);
+
+struct OperationQueueDiagnosticsConfig {
+    int local_diagnostics{0};
+    std::size_t backlog_threshold{OP_QUEUE_BACKLOG_WARN_THRESHOLD};
+    std::chrono::milliseconds wait_threshold{OP_QUEUE_WAIT_WARN_THRESHOLD};
+    std::chrono::milliseconds handle_threshold{OP_QUEUE_HANDLE_WARN_THRESHOLD};
+    std::vector<std::string> topic_filters{"/cmd/enforce_limits"};
+};
+
+std::string trim_copy(std::string value) {
+    const auto begin = std::find_if_not(value.begin(), value.end(), [](unsigned char c) { return std::isspace(c); });
+    const auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) { return std::isspace(c); }).base();
+    if (begin >= end) {
+        return {};
+    }
+    return std::string(begin, end);
+}
+
+int get_env_diagnostics_level(const char* name, const int default_value) {
+    const char* raw = std::getenv(name);
+    if (raw == nullptr) {
+        return default_value;
+    }
+
+    try {
+        const auto value = std::stoi(trim_copy(raw));
+        if (value < 0) {
+            return 0;
+        }
+        if (value > 3) {
+            return 3;
+        }
+        return value;
+    } catch (const std::exception&) {
+        return default_value;
+    }
+}
+
+std::size_t get_env_size(const char* name, const std::size_t default_value) {
+    const char* raw = std::getenv(name);
+    if (raw == nullptr) {
+        return default_value;
+    }
+
+    try {
+        return static_cast<std::size_t>(std::stoull(trim_copy(raw)));
+    } catch (const std::exception&) {
+        return default_value;
+    }
+}
+
+std::chrono::milliseconds get_env_milliseconds(const char* name, const std::chrono::milliseconds default_value) {
+    return std::chrono::milliseconds(
+        static_cast<int64_t>(get_env_size(name, static_cast<std::size_t>(default_value.count()))));
+}
+
+std::vector<std::string> get_env_csv(const char* name, std::vector<std::string> default_value) {
+    const char* raw = std::getenv(name);
+    if (raw == nullptr) {
+        return default_value;
+    }
+
+    std::vector<std::string> values;
+    std::stringstream ss(raw);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        item = trim_copy(item);
+        if (!item.empty()) {
+            values.push_back(item);
+        }
+    }
+    return values;
+}
+
+const OperationQueueDiagnosticsConfig& operation_queue_diagnostics_config() {
+    static const OperationQueueDiagnosticsConfig config{
+        get_env_diagnostics_level("LOCAL_DIAGNOSTICS", 0),
+        get_env_size("LOCAL_OP_QUEUE_DIAG_BACKLOG_THRESHOLD", OP_QUEUE_BACKLOG_WARN_THRESHOLD),
+        get_env_milliseconds("LOCAL_OP_QUEUE_DIAG_WAIT_MS", OP_QUEUE_WAIT_WARN_THRESHOLD),
+        get_env_milliseconds("LOCAL_OP_QUEUE_DIAG_HANDLE_MS", OP_QUEUE_HANDLE_WARN_THRESHOLD),
+        get_env_csv("LOCAL_OP_QUEUE_DIAG_TOPIC_FILTER", {"/cmd/enforce_limits"}),
+    };
+    return config;
+}
+
+bool topic_matches_filter(const std::string& topic, const std::vector<std::string>& filters) {
+    for (const auto& filter : filters) {
+        if (filter == "*" || topic.find(filter) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
 
 // Helper to split string by delimiter
 std::vector<std::string> split_topic(const std::string& topic, char delimiter = '/') {
@@ -72,9 +175,6 @@ std::string message_type_label(const json& payload) {
     return "ExternalMQTT";
 }
 
-bool is_enforce_limits_topic(const std::string& topic) {
-    return topic.find("/cmd/enforce_limits") != std::string::npos;
-}
 } // namespace
 
 MessageHandler::MessageHandler() {
@@ -117,10 +217,14 @@ void MessageHandler::add(const ParsedMessage& message) {
         }
         operation_cv.notify_all();
 
-        if (queue_size >= OP_QUEUE_BACKLOG_WARN_THRESHOLD || is_enforce_limits_topic(message.topic)) {
-            EVLOG_warning << "[OP_QUEUE_DIAG] enqueue type=" << message_type_label(message.data)
-                          << " topic=" << message.topic << " queue_size=" << queue_size;
-        }
+        const auto& diagnostics = operation_queue_diagnostics_config();
+        LOCAL_DIAG((queue_size >= diagnostics.backlog_threshold ||
+                    topic_matches_filter(message.topic, diagnostics.topic_filters)) ?
+                       diagnostics.local_diagnostics :
+                       0,
+                   LocalDiagnostics::Level::Warning, LocalDiagnostics::Category::Framework)
+            << "enqueue type=" << message_type_label(message.data) << " topic=" << message.topic
+            << " queue_size=" << queue_size;
     }
 }
 
@@ -160,23 +264,26 @@ void MessageHandler::run_operation_message_worker() {
         const auto wait_ms =
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - message.queued_at)
                 .count();
-        const bool enforce_limits = is_enforce_limits_topic(message.topic);
-        const bool backlog = remaining_queue_size >= OP_QUEUE_BACKLOG_WARN_THRESHOLD;
-        if (enforce_limits || backlog || wait_ms >= OP_QUEUE_WAIT_WARN_THRESHOLD.count()) {
-            EVLOG_warning << "[OP_QUEUE_DIAG] pop type=" << message_type_label(message.data)
-                          << " topic=" << message.topic << " wait_ms=" << wait_ms
-                          << " remaining_queue_size=" << remaining_queue_size;
-        }
+        const auto& diagnostics = operation_queue_diagnostics_config();
+        const bool topic_selected = topic_matches_filter(message.topic, diagnostics.topic_filters);
+        const bool backlog = remaining_queue_size >= diagnostics.backlog_threshold;
+        LOCAL_DIAG((topic_selected || backlog || wait_ms >= diagnostics.wait_threshold.count()) ?
+                       diagnostics.local_diagnostics :
+                       0,
+                   LocalDiagnostics::Level::Warning, LocalDiagnostics::Category::Framework)
+            << "pop type=" << message_type_label(message.data) << " topic=" << message.topic
+            << " wait_ms=" << wait_ms << " remaining_queue_size=" << remaining_queue_size;
 
         const auto handle_start = std::chrono::steady_clock::now();
         handle_operation_message(message.topic, message.data);
         const auto handle_ms =
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - handle_start)
                 .count();
-        if (enforce_limits || handle_ms >= OP_QUEUE_HANDLE_WARN_THRESHOLD.count()) {
-            EVLOG_warning << "[OP_QUEUE_DIAG] handled type=" << message_type_label(message.data)
-                          << " topic=" << message.topic << " duration_ms=" << handle_ms;
-        }
+        LOCAL_DIAG((topic_selected || handle_ms >= diagnostics.handle_threshold.count()) ? diagnostics.local_diagnostics :
+                                                                                           0,
+                   LocalDiagnostics::Level::Warning, LocalDiagnostics::Category::Framework)
+            << "handled type=" << message_type_label(message.data) << " topic=" << message.topic
+            << " duration_ms=" << handle_ms;
     }
     EVLOG_info << "Main worker thread stopped";
 }

@@ -36,6 +36,7 @@ target_sources(framework
         everest.cpp
         formatter.cpp
         filesystem.cpp
+        local_diagnostics.cpp
         message_queue.cpp
         module_adapter.cpp
         module_config.cpp

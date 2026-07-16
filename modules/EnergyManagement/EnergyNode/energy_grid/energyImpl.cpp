@@ -6,6 +6,7 @@
 #include <date/date.h>
 #include <date/tz.h>
 #include <utils/date.hpp>
+#include <utils/local_diagnostics.hpp>
 
 namespace module {
 namespace energy_grid {
@@ -221,12 +222,13 @@ std::optional<std::size_t> energyImpl::find_child_index_for_uuid_locked(const st
 }
 
 void energyImpl::handle_enforce_limits(types::energy::EnforcedLimits& value) {
+    const int local_diagnostics = mod->config.local_diagnostics;
 
     // route to children if it is not for me
     if (value.uuid != energy_flow_request.uuid) {
-        EVLOG_info << "[ENERGY_DIAG] energy_node enforce route begin node=" << energy_flow_request.uuid
-                   << " target=" << value.uuid << " valid_for=" << value.valid_for
-                   << "s children=" << mod->r_energy_consumer.size();
+        LOCAL_DIAG(local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Energy)
+            << "energy_node enforce route begin node=" << energy_flow_request.uuid << " target=" << value.uuid
+            << " valid_for=" << value.valid_for << "s children=" << mod->r_energy_consumer.size();
 
         std::optional<std::size_t> routed_child_index;
         {
@@ -236,39 +238,42 @@ void energyImpl::handle_enforce_limits(types::energy::EnforcedLimits& value) {
 
         if (routed_child_index.has_value() && routed_child_index.value() < mod->r_energy_consumer.size()) {
             const auto child_index = routed_child_index.value();
-            EVLOG_info << "[ENERGY_DIAG] energy_node forward begin node=" << energy_flow_request.uuid
-                       << " target=" << value.uuid << " child_index=" << child_index;
+            LOCAL_DIAG(local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Energy)
+                << "energy_node forward begin node=" << energy_flow_request.uuid << " target=" << value.uuid
+                << " child_index=" << child_index;
             const auto forward_start = std::chrono::steady_clock::now();
             mod->r_energy_consumer[child_index]->call_enforce_limits(value);
             const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                          std::chrono::steady_clock::now() - forward_start)
                                          .count();
-            EVLOG_info << "[ENERGY_DIAG] energy_node forward end node=" << energy_flow_request.uuid
-                       << " target=" << value.uuid << " child_index=" << child_index
-                       << " duration_ms=" << duration_ms;
+            LOCAL_DIAG(local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Energy)
+                << "energy_node forward end node=" << energy_flow_request.uuid << " target=" << value.uuid
+                << " child_index=" << child_index << " duration_ms=" << duration_ms;
         } else {
-            EVLOG_warning << "[ENERGY_DIAG] energy_node target branch unknown, broadcasting fallback node="
-                          << energy_flow_request.uuid << " target=" << value.uuid;
+            LOCAL_DIAG(local_diagnostics, LocalDiagnostics::Level::Warning, LocalDiagnostics::Category::Energy)
+                << "energy_node target branch unknown, broadcasting fallback node=" << energy_flow_request.uuid
+                << " target=" << value.uuid;
             int child_index = 0;
             for (auto& entry : mod->r_energy_consumer) {
-                EVLOG_info << "[ENERGY_DIAG] energy_node forward begin node=" << energy_flow_request.uuid
-                           << " target=" << value.uuid << " child_index=" << child_index;
+                LOCAL_DIAG(local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Energy)
+                    << "energy_node forward begin node=" << energy_flow_request.uuid << " target=" << value.uuid
+                    << " child_index=" << child_index;
                 const auto forward_start = std::chrono::steady_clock::now();
                 entry->call_enforce_limits(value);
                 const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                              std::chrono::steady_clock::now() - forward_start)
                                              .count();
-                EVLOG_info << "[ENERGY_DIAG] energy_node forward end node=" << energy_flow_request.uuid
-                           << " target=" << value.uuid << " child_index=" << child_index
-                           << " duration_ms=" << duration_ms;
+                LOCAL_DIAG(local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Energy)
+                    << "energy_node forward end node=" << energy_flow_request.uuid << " target=" << value.uuid
+                    << " child_index=" << child_index << " duration_ms=" << duration_ms;
                 child_index++;
             }
         }
-        EVLOG_info << "[ENERGY_DIAG] energy_node enforce route end node=" << energy_flow_request.uuid
-                   << " target=" << value.uuid;
+        LOCAL_DIAG(local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Energy)
+            << "energy_node enforce route end node=" << energy_flow_request.uuid << " target=" << value.uuid;
     } else {
-        EVLOG_info << "[ENERGY_DIAG] energy_node enforce consumed by node=" << energy_flow_request.uuid
-                   << " target=" << value.uuid;
+        LOCAL_DIAG(local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Energy)
+            << "energy_node enforce consumed by node=" << energy_flow_request.uuid << " target=" << value.uuid;
     }
 };
 

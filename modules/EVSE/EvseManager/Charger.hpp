@@ -107,7 +107,8 @@ public:
                float soft_over_current_measurement_noise_A, const int switch_3ph1ph_delay_s,
                const std::string switch_3ph1ph_cp_state, const int soft_over_current_timeout_ms,
                const int _state_F_after_fault_ms, const bool fail_on_powermeter_errors, const bool raise_mrec9,
-               const int sleep_before_enabling_pwm_hlc_mode_ms, const utils::SessionIdType session_id_type);
+               const int sleep_before_enabling_pwm_hlc_mode_ms, const utils::SessionIdType session_id_type,
+               const int local_diagnostics);
 
     void enable_disable_initial_state_publish();
     bool enable_disable(int connector_id, const types::evse_manager::EnableDisableSource& source);
@@ -349,6 +350,7 @@ private:
         int sleep_before_enabling_pwm_hlc_mode_ms{1000};
         // type used to generate session ids
         utils::SessionIdType session_id_type{utils::SessionIdType::UUID};
+        int local_diagnostics{0};
     } config_context;
 
     // Used by different threads, but requires no complete state machine locking

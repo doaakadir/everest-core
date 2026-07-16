@@ -12,6 +12,12 @@ config:
     type: integer
     minimum: 0
     maximum: 3
+  local_diagnostics:
+    description: "Local diagnostic log level: 0=disabled, 1=info, 2=info+warning, 3=info+warning+debug."
+    type: integer
+    minimum: 0
+    maximum: 3
+    default: 0
 provides:
   energy_grid:
     description: This is the chain interface to build the energy supply tree

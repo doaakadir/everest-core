@@ -16,6 +16,7 @@
 #include <string.h>
 #include <thread>
 #include <type_traits>
+#include <utils/local_diagnostics.hpp>
 
 #include <fmt/core.h>
 
@@ -1092,8 +1093,9 @@ bool Charger::set_max_current(float c, std::chrono::time_point<std::chrono::stea
     float c_abs{std::fabs(c)};
     const auto now = std::chrono::steady_clock::now();
     const auto valid_for_ms = std::chrono::duration_cast<std::chrono::milliseconds>(validUntil - now).count();
-    EVLOG_info << fmt::format("[ENERGY_DIAG] charger set_max_current begin requested={}A abs={}A valid_for_ms={}", c,
-                              c_abs, valid_for_ms);
+    LOCAL_DIAG(config_context.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Energy)
+        << fmt::format("charger set_max_current begin requested={}A abs={}A valid_for_ms={}", c, c_abs,
+                       valid_for_ms);
     if (c_abs <= CHARGER_ABSOLUTE_MAX_CURRENT) {
 
         // is it still valid?
@@ -1104,26 +1106,30 @@ bool Charger::set_max_current(float c, std::chrono::time_point<std::chrono::stea
                 shared_context.max_current = c_abs;
                 shared_context.max_current_valid_until = validUntil;
             }
-            EVLOG_info << fmt::format("[ENERGY_DIAG] charger set_max_current state_updated requested={}A", c);
+            LOCAL_DIAG(config_context.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Energy)
+                << "charger set_max_current state_updated requested=" << c << "A";
             // now after max_current is updated with c_abs we can update c_abs with the internal max current which
             // considers the cable limit as well
             c_abs = get_max_current_internal();
-            EVLOG_info << fmt::format("[ENERGY_DIAG] charger set_overcurrent_limit begin effective={}A", c_abs);
+            LOCAL_DIAG(config_context.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Energy)
+                << "charger set_overcurrent_limit begin effective=" << c_abs << "A";
             bsp->set_overcurrent_limit(c_abs);
-            EVLOG_info << fmt::format("[ENERGY_DIAG] charger set_overcurrent_limit end effective={}A", c_abs);
+            LOCAL_DIAG(config_context.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Energy)
+                << "charger set_overcurrent_limit end effective=" << c_abs << "A";
             // the max_current is internally an absolute value. The sign of c is now used to signal
             // if it is charging (c>0) or discharging (c<0)
-            EVLOG_info << fmt::format("[ENERGY_DIAG] charger signal_max_current begin effective={}A",
-                                      c < 0.0f ? -c_abs : c_abs);
+            LOCAL_DIAG(config_context.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Energy)
+                << "charger signal_max_current begin effective=" << (c < 0.0f ? -c_abs : c_abs) << "A";
             signal_max_current(c < 0.0f ? -c_abs : c_abs);
-            EVLOG_info << fmt::format("[ENERGY_DIAG] charger set_max_current accepted requested={}A effective={}A", c,
-                                      c < 0.0f ? -c_abs : c_abs);
+            LOCAL_DIAG(config_context.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Energy)
+                << "charger set_max_current accepted requested=" << c
+                << "A effective=" << (c < 0.0f ? -c_abs : c_abs) << "A";
             return true;
         }
     }
-    EVLOG_warning << fmt::format(
-        "[ENERGY_DIAG] charger set_max_current rejected requested={}A abs={}A valid_for_ms={} max_allowed={}A", c,
-        c_abs, valid_for_ms, CHARGER_ABSOLUTE_MAX_CURRENT);
+    LOCAL_DIAG(config_context.local_diagnostics, LocalDiagnostics::Level::Warning, LocalDiagnostics::Category::Energy)
+        << fmt::format("charger set_max_current rejected requested={}A abs={}A valid_for_ms={} max_allowed={}A", c,
+                       c_abs, valid_for_ms, CHARGER_ABSOLUTE_MAX_CURRENT);
     return false;
 }
 
@@ -1407,7 +1413,8 @@ void Charger::setup(bool has_ventilation, const ChargeMode _charge_mode, bool _a
                     const int _switch_3ph1ph_delay_s, const std::string _switch_3ph1ph_cp_state,
                     const int _soft_over_current_timeout_ms, const int _state_F_after_fault_ms,
                     const bool fail_on_powermeter_errors, const bool raise_mrec9,
-                    const int sleep_before_enabling_pwm_hlc_mode_ms, const utils::SessionIdType session_id_type) {
+                    const int sleep_before_enabling_pwm_hlc_mode_ms, const utils::SessionIdType session_id_type,
+                    const int local_diagnostics) {
     // set up board support package
     bsp->setup(has_ventilation);
 
@@ -1431,6 +1438,7 @@ void Charger::setup(bool has_ventilation, const ChargeMode _charge_mode, bool _a
     config_context.raise_mrec9 = raise_mrec9;
     config_context.sleep_before_enabling_pwm_hlc_mode_ms = sleep_before_enabling_pwm_hlc_mode_ms;
     config_context.session_id_type = session_id_type;
+    config_context.local_diagnostics = local_diagnostics;
 
     if (config_context.charge_mode == ChargeMode::AC and config_context.ac_hlc_enabled)
         EVLOG_info << "AC HLC mode enabled.";

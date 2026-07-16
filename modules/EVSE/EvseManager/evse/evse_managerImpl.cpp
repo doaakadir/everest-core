@@ -2,6 +2,7 @@
 // Copyright Pionix GmbH and Contributors to EVerest
 #include "evse_managerImpl.hpp"
 #include <utils/date.hpp>
+#include <utils/local_diagnostics.hpp>
 
 #include "../../evse_logging_utils.hpp"
 
@@ -366,8 +367,9 @@ void evse_managerImpl::handle_authorize_response(types::authorization::ProvidedI
                                                  types::authorization::ValidationResult& validation_result) {
     const auto start = std::chrono::steady_clock::now();
     const auto pnc = provided_token.authorization_type == types::authorization::AuthorizationType::PlugAndCharge;
-    EVLOG_info << fmt::format("[ENERGY_DIAG] evse authorize_response begin status={} pnc={}",
-                              static_cast<int>(validation_result.authorization_status), pnc);
+    LOCAL_DIAG(mod->config.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Auth)
+        << fmt::format("evse authorize_response begin status={} pnc={}",
+                       static_cast<int>(validation_result.authorization_status), pnc);
 
     if (validation_result.authorization_status == types::authorization::AuthorizationStatus::Accepted) {
 
@@ -377,7 +379,8 @@ void evse_managerImpl::handle_authorize_response(types::authorization::ProvidedI
             const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                          std::chrono::steady_clock::now() - start)
                                          .count();
-            EVLOG_info << fmt::format("[ENERGY_DIAG] evse authorize_response ignored duration_ms={}", duration_ms);
+            LOCAL_DIAG(mod->config.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Auth)
+                << "evse authorize_response ignored duration_ms=" << duration_ms;
             return;
         }
 
@@ -403,7 +406,8 @@ void evse_managerImpl::handle_authorize_response(types::authorization::ProvidedI
 
     const auto duration_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
-    EVLOG_info << fmt::format("[ENERGY_DIAG] evse authorize_response end duration_ms={}", duration_ms);
+    LOCAL_DIAG(mod->config.local_diagnostics, LocalDiagnostics::Level::Info, LocalDiagnostics::Category::Auth)
+        << "evse authorize_response end duration_ms=" << duration_ms;
 };
 
 void evse_managerImpl::handle_withdraw_authorization() {

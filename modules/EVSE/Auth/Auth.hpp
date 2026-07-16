@@ -37,6 +37,7 @@ struct Conf {
     std::string master_pass_group_id;
     bool prioritize_authorization_over_stopping_transaction;
     bool ignore_connector_faults;
+    int local_diagnostics;
     bool plug_in_timeout_enabled;
 };
 

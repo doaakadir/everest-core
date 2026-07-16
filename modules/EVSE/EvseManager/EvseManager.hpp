@@ -61,6 +61,7 @@ struct Conf {
     bool payment_enable_contract;
     double ac_nominal_voltage;
     bool ev_receipt_required;
+    int local_diagnostics;
     bool session_logging;
     std::string session_logging_path;
     bool session_logging_xml;

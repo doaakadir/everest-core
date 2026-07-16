@@ -53,6 +53,12 @@ config:
       If false, faulty connectors are treated as not available and will not be authorized. This is a good setting for e.g. public chargers.
     type: boolean
     default: false
+  local_diagnostics:
+    description: "Local diagnostic log level: 0=disabled, 1=info, 2=info+warning, 3=info+warning+debug."
+    type: integer
+    minimum: 0
+    maximum: 3
+    default: 0
   plug_in_timeout_enabled:
     description: >-
       This parameter is only used if the charging station has multiple EVSEs managed by this Auth module.

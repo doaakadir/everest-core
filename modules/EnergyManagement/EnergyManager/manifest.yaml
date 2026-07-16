@@ -29,6 +29,12 @@ config:
     description: Show debug output on command line.
     type: boolean
     default: false
+  local_diagnostics:
+    description: "Local diagnostic log level: 0=disabled, 1=info, 2=info+warning, 3=info+warning+debug."
+    type: integer
+    minimum: 0
+    maximum: 3
+    default: 0
   switch_3ph1ph_while_charging_mode:
     description: >-
       If supported by BSP in capabilities to switch between three phases and one phase and config option three_phases is set to true,
