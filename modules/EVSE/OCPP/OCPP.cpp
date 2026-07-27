@@ -5,7 +5,9 @@
 #include "../evse_logging_utils.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <fstream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -39,6 +41,23 @@ const ocpp::CiString<50> ISO15118_PNC_ENABLED_CONFIG_KEY = "ISO15118PnCEnabled";
 const ocpp::CiString<50> CENTRAL_CONTRACT_VALIDATION_ALLOWED_CONFIG_KEY = "CentralContractValidationAllowed";
 
 namespace fs = std::filesystem;
+
+static std::string evse_ready_state_string(const std::map<int32_t, bool>& readiness) {
+    if (readiness.empty()) {
+        return "none";
+    }
+
+    std::ostringstream stream;
+    bool first = true;
+    for (const auto& [evse_id, ready] : readiness) {
+        if (!first) {
+            stream << ",";
+        }
+        first = false;
+        stream << evse_id << ":" << (ready ? "ready" : "pending");
+    }
+    return stream.str();
+}
 
 /// \brief Converts the given \p error into the ErrorInfo that contains all necessary data for a
 /// StatusNotification.req
@@ -527,13 +546,21 @@ void OCPP::init() {
     subscribe_global_all_errors(error_handler, error_cleared_handler);
 
     this->init_evse_maps();
+    EVLOG_info << "OCPP EVSE readiness tracking initialized evse_count=" << this->r_evse_manager.size()
+               << " readiness=" << evse_ready_state_string(this->evse_ready_map);
 
     for (size_t evse_id = 1; evse_id <= this->r_evse_manager.size(); evse_id++) {
+        EVLOG_info << "OCPP subscribing EVSE readiness signals evse_id=" << evse_id;
         this->r_evse_manager.at(evse_id - 1)->subscribe_waiting_for_external_ready([this, evse_id](bool ready) {
             std::lock_guard<std::mutex> lg(this->evse_ready_mutex);
             if (ready) {
                 this->evse_ready_map[evse_id] = true;
+                EVLOG_info << "OCPP received EVSE waiting_for_external_ready evse_id=" << evse_id
+                           << " value=true readiness=" << evse_ready_state_string(this->evse_ready_map);
                 this->evse_ready_cv.notify_one();
+            } else {
+                EVLOG_info << "OCPP received EVSE waiting_for_external_ready evse_id=" << evse_id
+                           << " value=false readiness=" << evse_ready_state_string(this->evse_ready_map);
             }
         });
 
@@ -547,7 +574,12 @@ void OCPP::init() {
                                 << evse_id;
                 }
                 this->evse_ready_map[evse_id] = true;
+                EVLOG_info << "OCPP received EVSE ready evse_id=" << evse_id
+                           << " value=true readiness=" << evse_ready_state_string(this->evse_ready_map);
                 this->evse_ready_cv.notify_one();
+            } else {
+                EVLOG_info << "OCPP received EVSE ready evse_id=" << evse_id
+                           << " value=false readiness=" << evse_ready_state_string(this->evse_ready_map);
             }
         });
     }
@@ -1049,14 +1081,21 @@ void OCPP::ready() {
     // We must wait for EVSEs to be marked as ready before initializing ocpp since we will potentially update the
     // operative status of the connectors
     std::unique_lock lk(this->evse_ready_mutex);
+    EVLOG_info << "OCPP waiting for EVSE readiness before charge point init readiness="
+               << evse_ready_state_string(this->evse_ready_map);
     while (!this->all_evse_ready()) {
+        EVLOG_info << "OCPP EVSE readiness wait blocking readiness=" << evse_ready_state_string(this->evse_ready_map);
         this->evse_ready_cv.wait(lk);
+        EVLOG_info << "OCPP EVSE readiness wait woke readiness=" << evse_ready_state_string(this->evse_ready_map);
     }
+    EVLOG_info << "OCPP EVSE readiness wait complete readiness=" << evse_ready_state_string(this->evse_ready_map);
 
     this->charge_point->register_generic_configuration_key_changed_callback(
         [this](const ocpp::v16::KeyValue& key_value) { this->handle_config_key(key_value); });
 
+    EVLOG_info << "OCPP module configuration init begin";
     this->init_module_configuration();
+    EVLOG_info << "OCPP module configuration init complete";
 
     // if charger information interface is connected, override only these specific properties
     // which were loaded from configuration file(s)
@@ -1069,12 +1108,18 @@ void OCPP::ready() {
 
     // we can now call init(), which initializes the charge points state machine. It reads the connector availability
     // from the internal database and potentially triggers enable/disable callbacks at the evse.
+    EVLOG_info << "OCPP charge point init begin";
     this->charge_point->init({}, this->resuming_session_ids);
+    EVLOG_info << "OCPP charge point init complete";
 
     // this signals to the evses they can now start their internal state machines
     // signal to the EVSEs that OCPP is initialized
+    size_t evse_id = 1;
     for (const auto& evse : this->r_evse_manager) {
+        EVLOG_info << "OCPP signaling EVSE external_ready_to_start_charging evse_id=" << evse_id;
         evse->call_external_ready_to_start_charging();
+        EVLOG_info << "OCPP signaled EVSE external_ready_to_start_charging evse_id=" << evse_id;
+        evse_id++;
     }
 
     // wait for potential events from the evses in order to start OCPP with the correct initial state (e.g. EV might be
@@ -1085,6 +1130,7 @@ void OCPP::ready() {
     // we can now start the OCPP connection and process any queued events. We lock the event mutex to avoid
     // race conditions with error/event handlers that might be called from other threads
     std::lock_guard<std::mutex> lg(this->event_mutex);
+    EVLOG_info << "OCPP charge point start begin";
     this->charge_point->start({}, boot_reason, this->resuming_session_ids);
     EVLOG_info << "OCPP started";
     while (!this->event_queue.empty()) {
