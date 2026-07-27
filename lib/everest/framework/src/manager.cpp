@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Pionix GmbH and Contributors to EVerest
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 
 #include <cstdlib>
 #include <errno.h>
@@ -403,14 +405,21 @@ std::map<pid_t, std::string> start_modules(ManagerConfig& config, MQTTAbstractio
                 return;
             }
             std::size_t modules_spawned = 0;
+            std::vector<std::string> pending_modules;
             for (const auto& mod : modules_ready) {
                 const std::string text_ready =
                     fmt::format((mod.second.ready) ? TERMINAL_STYLE_OK : TERMINAL_STYLE_ERROR, "ready");
                 EVLOG_debug << fmt::format("  {}: {}", mod.first, text_ready);
                 if (mod.second.ready) {
                     modules_spawned += 1;
+                } else {
+                    pending_modules.push_back(mod.first);
                 }
             }
+            std::sort(pending_modules.begin(), pending_modules.end());
+            EVLOG_info << fmt::format("Module startup progress initialized={}/{} pending={}", modules_spawned,
+                                      modules_ready.size(),
+                                      pending_modules.empty() ? "none" : fmt::format("{}", fmt::join(pending_modules, ",")));
             if (!standalone_modules.empty() && std::find(standalone_modules.begin(), standalone_modules.end(),
                                                          module_id) != standalone_modules.end()) {
                 EVLOG_info << fmt::format("Standalone module {} initialized.", module_id);
