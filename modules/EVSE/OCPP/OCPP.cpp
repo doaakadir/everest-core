@@ -11,6 +11,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "generated/types/ocpp.hpp"
 #include "ocpp/common/types.hpp"
@@ -39,6 +40,7 @@ const std::string SWITCHING_PHASES_REASON = "SwitchingPhases";
 const ocpp::CiString<50> CONNECTION_TIMEOUT_CONFIG_KEY = "ConnectionTimeout";
 const ocpp::CiString<50> ISO15118_PNC_ENABLED_CONFIG_KEY = "ISO15118PnCEnabled";
 const ocpp::CiString<50> CENTRAL_CONTRACT_VALIDATION_ALLOWED_CONFIG_KEY = "CentralContractValidationAllowed";
+const ocpp::CiString<50> CHARGE_POINT_ID_CONFIG_KEY = "ChargePointId";
 
 namespace fs = std::filesystem;
 
@@ -57,6 +59,16 @@ static std::string evse_ready_state_string(const std::map<int32_t, bool>& readin
         stream << evse_id << ":" << (ready ? "ready" : "pending");
     }
     return stream.str();
+}
+
+static types::ocpp::KeyValue to_everest_configuration_key(const ocpp::v16::KeyValue& key_value) {
+    types::ocpp::KeyValue converted;
+    converted.key = key_value.key.get();
+    converted.read_only = key_value.readonly;
+    if (key_value.value.has_value()) {
+        converted.value = key_value.value.value().get();
+    }
+    return converted;
 }
 
 /// \brief Converts the given \p error into the ErrorInfo that contains all necessary data for a
@@ -1093,9 +1105,27 @@ void OCPP::ready() {
     this->charge_point->register_generic_configuration_key_changed_callback(
         [this](const ocpp::v16::KeyValue& key_value) { this->handle_config_key(key_value); });
 
+    this->charge_point->register_configuration_key_changed_callback(
+        CHARGE_POINT_ID_CONFIG_KEY.get(), [this](const ocpp::v16::KeyValue key_value) {
+            this->p_main->publish_configuration_key(to_everest_configuration_key(key_value));
+        });
+
     EVLOG_info << "OCPP module configuration init begin";
     this->init_module_configuration();
     EVLOG_info << "OCPP module configuration init complete";
+
+    ocpp::v16::GetConfigurationRequest charge_point_id_request;
+    charge_point_id_request.key = std::vector<ocpp::CiString<50>>{CHARGE_POINT_ID_CONFIG_KEY};
+    const auto charge_point_id_response = this->charge_point->get_configuration_key(charge_point_id_request);
+    if (charge_point_id_response.configurationKey.has_value()) {
+        for (const auto& key_value : charge_point_id_response.configurationKey.value()) {
+            if (key_value.key.get() == CHARGE_POINT_ID_CONFIG_KEY.get()) {
+                this->p_main->publish_configuration_key(to_everest_configuration_key(key_value));
+                EVLOG_info << "OCPP ChargePointId configuration snapshot published";
+                break;
+            }
+        }
+    }
 
     // if charger information interface is connected, override only these specific properties
     // which were loaded from configuration file(s)
