@@ -655,7 +655,7 @@ void OCPP::init() {
         sql_init_path, std::filesystem::path(this->config.MessageLogPath),
         std::make_shared<EvseSecurity>(*this->r_security), std::nullopt,
         [this](const std::string& message, ocpp::MessageDirection direction) {
-            EVLOG_info << "[RAW OCPP CALLBACK] direction="
+            EVLOG_debug << "[RAW OCPP CALLBACK] direction="
                        << (direction == ocpp::MessageDirection::CSMSToChargingStation ? "RX" : "TX")
                        << " message=" << message;
                        
