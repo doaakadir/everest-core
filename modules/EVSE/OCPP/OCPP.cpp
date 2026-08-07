@@ -342,10 +342,8 @@ void OCPP::init_evse_subscriptions() {
                 const std::string payload = j.dump();
                 const uint32_t fp = evse_logging_utils::fnv1a_32(payload);
                 EVLOG_info << "\x1b[36m"
-                           << "[EV MNGR -> OCPP] evse_id=" << evse_id
-                           << " ts=" << powermeter.timestamp
-                           << " fp=" << fmt::format("{:08x}", fp)
-                           << " " << payload << "\x1b[0m";
+                           << "[EV MNGR -> OCPP] evse_id=" << evse_id << " ts=" << powermeter.timestamp
+                           << " fp=" << fmt::format("{:08x}", fp) << " " << payload << "\x1b[0m";
             }
             ocpp::Measurement measurement;
             measurement.power_meter = conversions::to_ocpp_power_meter(powermeter);
@@ -655,7 +653,22 @@ void OCPP::init() {
     this->charge_point = std::make_unique<ocpp::v16::ChargePoint>(
         json_config.dump(), this->ocpp_share_path, user_config_path, std::filesystem::path(this->config.DatabasePath),
         sql_init_path, std::filesystem::path(this->config.MessageLogPath),
-        std::make_shared<EvseSecurity>(*this->r_security));
+        std::make_shared<EvseSecurity>(*this->r_security), std::nullopt,
+        [this](const std::string& message, ocpp::MessageDirection direction) {
+            types::ocpp::Message ocpp_message;
+
+            ocpp_message.message = message;
+
+            if (direction == ocpp::MessageDirection::CSMSToChargingStation) {
+                ocpp_message.direction = types::ocpp::MessageDirection::CSMSToChargingStation;
+            } else {
+                ocpp_message.direction = types::ocpp::MessageDirection::ChargingStationToCSMS;
+            }
+
+            ocpp_message.version.emplace("1.6");
+
+            this->p_ocpp_generic->publish_ocpp_message(ocpp_message);
+        });
 
     this->charge_point->set_message_queue_resume_delay(std::chrono::seconds(config.MessageQueueResumeDelay));
 
