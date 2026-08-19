@@ -21,8 +21,13 @@ namespace main {
 static std::string mac_to_ascii(const std::string& mac_binary) {
     if (mac_binary.size() < 6)
         return "";
-    return fmt::format("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}", mac_binary[0], mac_binary[1], mac_binary[2],
-                       mac_binary[3], mac_binary[4], mac_binary[5]);
+    return fmt::format("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+                       static_cast<unsigned int>(static_cast<unsigned char>(mac_binary[0])),
+                       static_cast<unsigned int>(static_cast<unsigned char>(mac_binary[1])),
+                       static_cast<unsigned int>(static_cast<unsigned char>(mac_binary[2])),
+                       static_cast<unsigned int>(static_cast<unsigned char>(mac_binary[3])),
+                       static_cast<unsigned int>(static_cast<unsigned char>(mac_binary[4])),
+                       static_cast<unsigned int>(static_cast<unsigned char>(mac_binary[5])));
 }
 
 void slacImpl::init() {
@@ -42,6 +47,7 @@ void slacImpl::run() {
     // initialize slac i/o
     SlacIO slac_io;
     try {
+        EVLOG_info << fmt::format("SLAC initializing on device {}", config.device);
         slac_io.init(config.device);
     } catch (const std::exception& e) {
         EVLOG_error << fmt::format("Couldn't open device {} for SLAC communication. Reason: {}", config.device,
@@ -53,13 +59,25 @@ void slacImpl::run() {
 
     // setup callbacks
     slac::fsm::evse::ContextCallbacks callbacks;
-    callbacks.send_raw_slac = [&slac_io](slac::messages::HomeplugMessage& msg) { slac_io.send(msg); };
+    callbacks.send_raw_slac = [&slac_io](slac::messages::HomeplugMessage& msg) {
+        EVLOG_debug << fmt::format("SLAC TX raw frame: mmtype={:#06x}", msg.get_mmtype());
+        slac_io.send(msg);
+    };
 
-    callbacks.signal_dlink_ready = [this](bool value) { publish_dlink_ready(value); };
+    callbacks.signal_dlink_ready = [this](bool value) {
+        EVLOG_info << fmt::format("SLAC D-LINK ready = {}", value ? "true" : "false");
+        publish_dlink_ready(value);
+    };
 
-    callbacks.signal_state = [this](const std::string& value) { publish_state(value); };
+    callbacks.signal_state = [this](const std::string& value) {
+        EVLOG_info << fmt::format("SLAC FSM state -> {}", value);
+        publish_state(value);
+    };
 
-    callbacks.signal_error_routine_request = [this]() { publish_request_error_routine(nullptr); };
+    callbacks.signal_error_routine_request = [this]() {
+        EVLOG_warning << "SLAC error routine requested by FSM";
+        publish_request_error_routine(nullptr);
+    };
 
     callbacks.log_debug = [](const std::string& text) { EVLOG_debug << text; };
     callbacks.log_info = [](const std::string& text) { EVLOG_info << text; };
@@ -67,11 +85,17 @@ void slacImpl::run() {
     callbacks.log_error = [](const std::string& text) { EVLOG_error << text; };
 
     if (config.publish_mac_on_first_parm_req) {
-        callbacks.signal_ev_mac_address_parm_req = [this](const std::string& mac) { publish_ev_mac_address(mac); };
+        callbacks.signal_ev_mac_address_parm_req = [this](const std::string& mac) {
+            EVLOG_info << fmt::format("EV MAC learned from CM_SLAC_PARM.REQ: {}", mac_to_ascii(mac));
+            publish_ev_mac_address(mac);
+        };
     }
 
     if (config.publish_mac_on_match_cnf) {
-        callbacks.signal_ev_mac_address_match_cnf = [this](const std::string& mac) { publish_ev_mac_address(mac); };
+        callbacks.signal_ev_mac_address_match_cnf = [this](const std::string& mac) {
+            EVLOG_info << fmt::format("EV MAC learned from CM_SLAC_MATCH.CNF: {}", mac_to_ascii(mac));
+            publish_ev_mac_address(mac);
+        };
     }
 
     auto fsm_ctx = slac::fsm::evse::Context(callbacks);
@@ -100,7 +124,10 @@ void slacImpl::run() {
 
     fsm_ctrl = std::make_unique<FSMController>(fsm_ctx);
 
-    slac_io.run([](slac::messages::HomeplugMessage& msg) { fsm_ctrl->signal_new_slac_message(msg); });
+    slac_io.run([](slac::messages::HomeplugMessage& msg) {
+        EVLOG_debug << fmt::format("SLAC RX raw frame: mmtype={:#06x}", msg.get_mmtype());
+        fsm_ctrl->signal_new_slac_message(msg);
+    });
 
     fsm_ctrl->run();
 }
@@ -112,15 +139,20 @@ void slacImpl::handle_reset(bool& enable) {
     // some hundreds of msecs at the beginning of the charging session as we do not need to set up keys. Then
     // EvseManager can switch on 5% PWM basically immediately as SLAC is already ready.
     if (!enable) {
+        EVLOG_info << "slac.reset(false) received -> resetting SLAC FSM";
         fsm_ctrl->signal_reset();
+    } else {
+        EVLOG_info << "slac.reset(true) received -> low-power mode not implemented, ignoring";
     }
 };
 
 void slacImpl::handle_enter_bcd() {
+    EVLOG_debug << "ENTER_BCD requested by EvseManager";
     fsm_ctrl->signal_enter_bcd();
 };
 
 void slacImpl::handle_leave_bcd() {
+    EVLOG_debug << "LEAVE_BCD requested by EvseManager";
     fsm_ctrl->signal_leave_bcd();
 };
 

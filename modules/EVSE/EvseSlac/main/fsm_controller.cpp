@@ -148,7 +148,11 @@ void FSMController::run() {
             // call immediately again
             continue;
         } else if (feed_result.internal_error() || feed_result.unhandled_event()) {
-            // FIXME (aw): would need to log here!
+            if (feed_result.internal_error()) {
+                ctx.log_error("SLAC FSM internal error while feeding state machine");
+            } else {
+                ctx.log_warn("SLAC FSM ignored unhandled event in current state");
+            }
         } else if (feed_result.has_value() == true) {
             const auto timeout = *feed_result;
             if (timeout == 0) {
