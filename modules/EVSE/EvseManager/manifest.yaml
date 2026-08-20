@@ -325,6 +325,11 @@ config:
       although ISO15118 or IEC61851 does not specify a timeout.
     type: integer
     default: 500
+  wait_for_energy_in_authloop_timeout_ms:
+    description: >-
+      Maximum time to wait in DC HLC authentication loop for non-zero energy limits before signaling no energy available.
+    type: integer
+    default: 5000
   central_contract_validation_allowed:
     description: >-
       Used for ISO15118 plug and charge:

@@ -325,7 +325,7 @@ void Charger::run_state_machine() {
                 if (not(evse_limit.evse_maximum_current_limit > 0 and evse_limit.evse_maximum_power_limit > 0)) {
 
                     // Wait some time here in this state to see if we get energy from the EnergyManager...
-                    if (time_in_current_state < WAIT_FOR_ENERGY_IN_AUTHLOOP_TIMEOUT_MS) {
+                    if (time_in_current_state < config_context.wait_for_energy_in_authloop_timeout_ms) {
                         break;
                     }
 
@@ -1432,7 +1432,8 @@ void Charger::setup(bool has_ventilation, const ChargeMode _charge_mode, bool _a
                     const int _switch_3ph1ph_delay_s, const std::string _switch_3ph1ph_cp_state,
                     const int _soft_over_current_timeout_ms, const int _state_F_after_fault_ms,
                     const bool fail_on_powermeter_errors, const bool raise_mrec9,
-                    const int sleep_before_enabling_pwm_hlc_mode_ms, const utils::SessionIdType session_id_type,
+                    const int sleep_before_enabling_pwm_hlc_mode_ms,
+                    const int wait_for_energy_in_authloop_timeout_ms, const utils::SessionIdType session_id_type,
                     const int local_diagnostics) {
     // set up board support package
     bsp->setup(has_ventilation);
@@ -1456,6 +1457,7 @@ void Charger::setup(bool has_ventilation, const ChargeMode _charge_mode, bool _a
     config_context.fail_on_powermeter_errors = fail_on_powermeter_errors;
     config_context.raise_mrec9 = raise_mrec9;
     config_context.sleep_before_enabling_pwm_hlc_mode_ms = sleep_before_enabling_pwm_hlc_mode_ms;
+    config_context.wait_for_energy_in_authloop_timeout_ms = wait_for_energy_in_authloop_timeout_ms;
     config_context.session_id_type = session_id_type;
     config_context.local_diagnostics = local_diagnostics;
 

@@ -110,6 +110,7 @@ struct Conf {
     bool fail_on_powermeter_errors;
     bool raise_mrec9;
     int sleep_before_enabling_pwm_hlc_mode_ms;
+    int wait_for_energy_in_authloop_timeout_ms;
     bool central_contract_validation_allowed;
     bool contract_certificate_installation_enabled;
     bool inoperative_error_use_vendor_id;

@@ -107,7 +107,8 @@ public:
                float soft_over_current_measurement_noise_A, const int switch_3ph1ph_delay_s,
                const std::string switch_3ph1ph_cp_state, const int soft_over_current_timeout_ms,
                const int _state_F_after_fault_ms, const bool fail_on_powermeter_errors, const bool raise_mrec9,
-               const int sleep_before_enabling_pwm_hlc_mode_ms, const utils::SessionIdType session_id_type,
+               const int sleep_before_enabling_pwm_hlc_mode_ms,
+               const int wait_for_energy_in_authloop_timeout_ms, const utils::SessionIdType session_id_type,
                const int local_diagnostics);
 
     void enable_disable_initial_state_publish();
@@ -348,6 +349,7 @@ private:
         bool raise_mrec9;
         // sleep before enabling pwm in hlc mode
         int sleep_before_enabling_pwm_hlc_mode_ms{1000};
+        int wait_for_energy_in_authloop_timeout_ms{5000};
         // type used to generate session ids
         utils::SessionIdType session_id_type{utils::SessionIdType::UUID};
         int local_diagnostics{0};
@@ -434,8 +436,6 @@ private:
     // This is not required by IEC61851-1, but it is allowed by the IEC. It helps some older EVs to start charging
     // after the wake-up sequence.
     static constexpr int STAY_IN_X1_AFTER_TSTEP_EF_MS = 750;
-    static constexpr int WAIT_FOR_ENERGY_IN_AUTHLOOP_TIMEOUT_MS = 5000;
-
     types::evse_manager::EnableDisableSource active_enable_disable_source{
         types::evse_manager::Enable_source::Unspecified, types::evse_manager::Enable_state::Unassigned, 10000};
     std::vector<types::evse_manager::EnableDisableSource> enable_disable_source_table;
